@@ -7,8 +7,8 @@ module Engine
   class Hex
     include Assignable
 
-    attr_accessor :x, :y, :ignore_for_axes
-    attr_reader :connections, :coordinates, :empty, :layout, :neighbors, :tile, :location_name, :original_tile
+    attr_accessor :x, :y, :ignore_for_axes, :location_name
+    attr_reader :connections, :coordinates, :empty, :layout, :neighbors, :tile, :original_tile
 
     DIRECTIONS = {
       flat: {
@@ -93,6 +93,11 @@ module Engine
       @coordinates
     end
 
+    def tile=(new_tile)
+      @original_tile = @tile = new_tile
+      new_tile.hex = self
+    end
+
     def lay(tile)
       # key: city on @tile (AKA old_city)
       # values: city on tile (AKA new_city)
@@ -107,11 +112,13 @@ module Engine
           @tile.cities.map.with_index do |old_city, index|
             new_city = tile.cities.find do |city|
               # we want old_edges to be subset of new_edges
-              (old_city.exits - city.exits).empty?
+              # without the any? check, first city will always match
+              old_city.exits.any? && (old_city.exits - city.exits).empty?
             end
 
             # When downgrading from yellow to no-exit tiles, assume it's the same index
-            new_city ||= tile.cities[index]
+            # Also, when upgrading a no-exit city, assume it's the same index if possible
+            new_city ||= (tile.cities[index] || tile.cities[0])
             [old_city, new_city]
           end.to_h
         end
@@ -136,8 +143,9 @@ module Engine
       # when upgrading, preserve tokens on previous tile (must be handled after
       # reservations are completely done due to OO weirdness)
       city_map.each do |old_city, new_city|
-        old_city.tokens.each do |token|
-          new_city.exchange_token(token) if token
+        old_city.tokens.each.with_index do |token, index|
+          cheater = (index >= old_city.normal_slots) && index
+          new_city.exchange_token(token, cheater: cheater) if token
         end
         old_city.remove_tokens!
       end
@@ -176,15 +184,17 @@ module Engine
     end
 
     def lay_downgrade(tile)
-      hexes = @connections.values.flatten.flat_map(&:hexes)
+      hexes = []
+
+      @tile.paths.each do |path|
+        path.walk { |p| hexes << p.hex if p.node? }
+      end
 
       lay(tile)
 
-      hexes.each do |hex|
+      hexes.uniq.each do |hex|
         hex.connections.each do |_, connections|
-          connections.select! do |connection|
-            connection.paths.all?(&:hex)
-          end
+          connections.select!(&:valid?)
         end
       end
 
@@ -209,7 +219,7 @@ module Engine
     end
 
     def all_connections
-      @connections.values.flatten.uniq
+      @connections.values.flatten.uniq.select(&:valid?)
     end
 
     def neighbor_direction(other)

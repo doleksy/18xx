@@ -36,6 +36,10 @@ def repair(game, original_actions, actions, broken_action)
     # Move token is now place token.
     broken_action['type'] = 'place_token'
     return [broken_action]
+  elsif game.active_step.is_a?(Engine::Step::G1817::Acquire)
+    pass = Engine::Action::Pass.new(game.active_step.current_entity).to_h
+    actions.insert(action_idx, pass)
+    return
   elsif game.active_step.is_a?(Engine::Step::G1889::SpecialTrack)
     # laying track for Ehime Railway didn't always block, now it needs an
     # explicit pass
@@ -215,7 +219,7 @@ def attempt_repair(actions)
 end
 
 def migrate_data(data)
-players = data['players'].map { |p| p['name'] }
+players = data['players'].map { |p| [p['id'],p['name']] }.to_h
   engine = Engine::GAMES_BY_TITLE[data['title']]
   begin
     data['actions'], repairs = attempt_repair(data['actions']) do
@@ -241,9 +245,10 @@ def migrate_db_actions_in_mem(data)
   begin
     actions, repairs = attempt_repair(original_actions) do
       engine.new(
-        data.ordered_players.map(&:name),
+        data.ordered_players.map { |u| [u.id, u.name] }.to_h,
         id: data.id,
         actions: [],
+        optional_rules: data.settings['optional_rules']&.map(&:to_sym),
       )
     end
     puts repairs
@@ -261,10 +266,12 @@ def migrate_db_actions(data)
   engine = Engine::GAMES_BY_TITLE[data.title]
   begin
     actions, repairs = attempt_repair(original_actions) do
+      players = data.ordered_players.map { |u| [u.id, u.name] }.to_h
       engine.new(
-        data.ordered_players.map(&:name),
+        players,
         id: data.id,
         actions: [],
+        optional_rules: data.settings['optional_rules']&.map(&:to_sym),
       )
     end
     if actions
@@ -279,9 +286,10 @@ def migrate_db_actions(data)
         DB.transaction do
           Action.where(game: data).delete
           game = engine.new(
-            data.ordered_players.map(&:name),
+            data.ordered_players.map { |u| [u.id, u.name] }.to_h,
             id: data.id,
             actions: [],
+            optional_rules: data.settings['optional_rules']&.map(&:to_sym),
           )
           actions.each do |action|
             game.process_action(action)
@@ -301,7 +309,7 @@ def migrate_db_actions(data)
   rescue Exception => e
     puts 'Something went wrong', e
     puts "Pinning #{data.id}"
-    pin = '17af77be'
+    pin = '5f8239fb'
     data.settings['pin']=pin
     data.save
   end
@@ -331,8 +339,24 @@ def migrate_db_to_json(id, filename)
   File.write(filename, JSON.pretty_generate(json))
 end
 
-def migrate_all()
-  DB[:games].order(:id).where(Sequel.pg_jsonb_op(:settings).has_key?('pin') => false, status: %w[active finished]).select(:id).paged_each(rows_per_fetch: 1) do |game|
+def migrate_title(title)
+  DB[:games].order(:id).where(Sequel.pg_jsonb_op(:settings).has_key?('pin') => false, status: %w[active finished], title: title).select(:id).paged_each(rows_per_fetch: 1) do |game|
+    games = Game.eager(:user, :players, :actions).where(id: [game[:id]]).all
+    games.each {|data|
+      migrate_db_actions(data)
+    }
+
+  end
+end
+
+def migrate_all(game_ids: nil)
+  where_args = {
+    Sequel.pg_jsonb_op(:settings).has_key?('pin') => false,
+    status: %w[active finished],
+  }
+  where_args[:id] = game_ids if game_ids
+
+  DB[:games].order(:id).where(**where_args).select(:id).paged_each(rows_per_fetch: 1) do |game|
     games = Game.eager(:user, :players, :actions).where(id: [game[:id]]).all
     games.each {|data|
       migrate_db_actions(data)

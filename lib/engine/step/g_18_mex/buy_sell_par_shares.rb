@@ -4,7 +4,7 @@ require_relative '../buy_sell_par_shares'
 
 module Engine
   module Step
-    module G18MEX
+    module G18Mex
       class BuySellParShares < BuySellParShares
         def can_buy?(entity, bundle)
           super && !attempt_ndm_action_on_unavailable?(bundle)
@@ -12,6 +12,13 @@ module Engine
 
         def can_sell?(entity, bundle)
           super && !attempt_ndm_action_on_unavailable?(bundle)
+        end
+
+        def can_gain?(entity, bundle)
+          # NdM 5% shares does not affect cert limit
+          return true if bundle&.percent == 5
+
+          super
         end
 
         private

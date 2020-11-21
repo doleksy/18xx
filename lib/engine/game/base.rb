@@ -33,7 +33,8 @@ module Engine
       attr_reader :actions, :bank, :cert_limit, :cities, :companies, :corporations,
                   :depot, :finished, :graph, :hexes, :id, :loading, :loans, :log, :minors,
                   :phase, :players, :operating_rounds, :round, :share_pool, :stock_market,
-                  :tiles, :turn, :total_loans, :undo_possible, :redo_possible, :round_history, :all_tiles
+                  :tiles, :turn, :total_loans, :undo_possible, :redo_possible, :round_history, :all_tiles,
+                  :optional_rules
 
       DEV_STAGES = %i[production beta alpha prealpha].freeze
       DEV_STAGE = :prealpha
@@ -61,6 +62,8 @@ module Engine
       #                         end after the next complete OR set
       GAME_END_CHECK = { bankrupt: :immediate, bank: :full_or }.freeze
 
+      OPTIONAL_RULES = [].freeze
+
       BANKRUPTCY_ALLOWED = true
 
       BANK_CASH = 12_000
@@ -85,9 +88,25 @@ module Engine
         6 => 11,
       }.freeze
 
-      CERT_LIMIT_COLORS = %i[brown orange yellow].freeze
+      CERT_LIMIT_TYPES = %i[multiple_buy unlimited no_cert_limit].freeze
+      # Does the cert limit decrease when a player becomes bankrupt?
+      CERT_LIMIT_CHANGE_ON_BANKRUPTCY = false
 
-      MULTIPLE_BUY_COLORS = %i[brown].freeze
+      MULTIPLE_BUY_TYPES = %i[multiple_buy].freeze
+
+      STOCKMARKET_COLORS = {
+        par: :red,
+        endgame: :blue,
+        close: :black,
+        multiple_buy: :brown,
+        unlimited: :orange,
+        no_cert_limit: :yellow,
+        liquidation: :red,
+        acquisition: :yellow,
+        repar: :gray,
+        ignore_one_sale: :green,
+        safe_par: :white,
+      }.freeze
 
       MIN_BID_INCREMENT = 5
 
@@ -101,9 +120,11 @@ module Engine
       # first           -- after first stock round
       # operate         -- after operation
       # p_any_operate   -- pres any time, share holders after operation
+      # any_time        -- at any time
       SELL_AFTER = :first
 
       # down_share -- down one row per share
+      # down_per_10 -- down one row per 10% sold
       # down_block -- down one row per block
       # left_block_pres -- left one column per block if president
       # left_block -- one row per block
@@ -118,6 +139,10 @@ module Engine
       # do shares in the pool drop the price?
       # none, one, each
       POOL_SHARE_DROP = :none
+
+      # :after_last_to_act -- player after the last to act goes first. Order remains the same.
+      # :first_to_pass -- players ordered by when they first started passing.
+      NEXT_SR_PLAYER_ORDER = :after_last_to_act
 
       # do tile reservations completely block other companies?
       TILE_RESERVATION_BLOCKS_OTHERS = false
@@ -161,13 +186,21 @@ module Engine
       STATUS_TEXT = { 'can_buy_companies' =>
                       ['Can Buy Companies', 'All corporations can buy companies from players'] }.freeze
 
-      # Add elements (paragraphs of text) here to display it on Info page.
-      TIMELINE = [].freeze
+      MARKET_TEXT = { par: 'Par value',
+                      no_cert_limit: 'Corporation shares do not count towards cert limit',
+                      unlimited: 'Corporation shares can be held above 60%',
+                      multiple_buy: 'Can buy more than one share in the corporation per turn',
+                      close: 'Corporation closes',
+                      endgame: 'End game trigger',
+                      liquidation: 'Liquidation',
+                      repar: 'Par value after bankruptcy',
+                      ignore_one_sale: 'Ignore first share sold when moving price' }.freeze
 
       IPO_NAME = 'IPO'
       IPO_RESERVED_NAME = 'IPO Reserved'
-
+      MARKET_SHARE_LIMIT = 50 # percent
       ALL_COMPANIES_ASSIGNABLE = false
+      OBSOLETE_TRAINS_COUNT_FOR_LIMIT = false
 
       CACHABLE = [
         %i[players player],
@@ -189,6 +222,27 @@ module Engine
       RAND_M = 2**31
 
       def setup; end
+
+      def init_optional_rules(optional_rules)
+        optional_rules = (optional_rules || []).map(&:to_sym)
+        self.class::OPTIONAL_RULES.each do |rule|
+          optional_rules.delete(rule[:sym]) if rule[:players] && !rule[:players].include?(@players.size)
+        end
+        optional_rules
+      end
+
+      def setup_optional_rules; end
+
+      def log_optional_rules
+        return if @optional_rules.empty?
+
+        @log << 'Optional rules used in this game:'
+        self.class::OPTIONAL_RULES.each do |o_r|
+          next unless @optional_rules.include?(o_r[:sym])
+
+          @log << " * #{o_r[:short_name]}: #{o_r[:desc]}"
+        end
+      end
 
       def self.title
         name.split('::').last.slice(1..-1)
@@ -276,7 +330,7 @@ module Engine
         const_set(:LAYOUT, data['layout'].to_sym)
       end
 
-      def initialize(names, id: 0, actions: [], pin: nil, strict: false)
+      def initialize(names, id: 0, actions: [], pin: nil, strict: false, optional_rules: [])
         @id = id
         @turn = 1
         @final_turn = nil
@@ -285,8 +339,15 @@ module Engine
         @finished = false
         @log = []
         @actions = []
-        @names = names.freeze
-        @players = @names.map { |name| Player.new(name) }
+        @names = if names.is_a?(Hash)
+                   names.freeze
+                 else
+                   names.map { |n| [n, n] }.to_h
+                 end
+
+        @players = @names.map { |player_id, name| Player.new(player_id, name) }
+
+        @optional_rules = init_optional_rules(optional_rules)
 
         @seed = @id.to_s.scan(/\d+/).first.to_i % RAND_M
 
@@ -297,13 +358,13 @@ module Engine
           @log << "#{self.class.title} is currently considered 'alpha',"\
             ' the rules implementation is likely to not be complete.'
           @log << 'As the implementation improves, games that are not compatible'\
-            ' with the latest version may be deleted without notice.'
+            ' with the latest version will be deleted without notice.'
           @log << 'We suggest that any alpha quality game is concluded within 7 days.'
         when :beta
           @log << "#{self.class.title} is currently considered 'beta',"\
             ' the rules implementation may allow illegal moves.'
           @log << 'As the implementation improves, games that are not compatible'\
-            ' with the latest version may be deleted after 7 days.'
+            ' with the latest version will be pinned but may be deleted after 7 days.'
           @log << 'Because of this we suggest not playing games that may take months to complete.'
         end
 
@@ -340,6 +401,8 @@ module Engine
 
         init_company_abilities
 
+        setup_optional_rules
+        log_optional_rules
         setup
 
         initialize_actions(actions)
@@ -379,7 +442,7 @@ module Engine
       end
 
       def current_entity
-        @round.active_step.current_entity
+        @round.active_step&.current_entity || actions[-1].entity
       end
 
       def active_players
@@ -449,6 +512,10 @@ module Engine
           return clone(@actions)
         end
 
+        @log << "• Action(#{action.type}) via Master Mode by #{action.user}:" if action.user
+
+        preprocess_action(action)
+
         @round.process_action(action)
 
         unless action.is_a?(Action::Message)
@@ -479,6 +546,18 @@ module Engine
         self
       end
 
+      def preprocess_action(_action); end
+
+      def all_corporations
+        corporations
+      end
+
+      def sorted_corporations
+        # Corporations sorted by some potential game rules
+        ipoed, others = corporations.partition(&:ipoed)
+        ipoed.sort + others
+      end
+
       def current_action_id
         @actions.size + 1
       end
@@ -490,7 +569,7 @@ module Engine
       end
 
       def clone(actions)
-        self.class.new(@names, id: @id, pin: @pin, actions: actions)
+        self.class.new(@names, id: @id, pin: @pin, actions: actions, optional_rules: @optional_rules)
       end
 
       def trains
@@ -605,14 +684,16 @@ module Engine
         self.class::SELL_AFTER == :first ? @turn > 1 : true
       end
 
-      def sell_shares_and_change_price(bundle)
+      def sell_shares_and_change_price(bundle, allow_president_change: true)
         corporation = bundle.corporation
         price = corporation.share_price.price
         was_president = corporation.president?(bundle.owner)
-        @share_pool.sell_shares(bundle)
+        @share_pool.sell_shares(bundle, allow_president_change: allow_president_change)
         case self.class::SELL_MOVEMENT
         when :down_share
           bundle.num_shares.times { @stock_market.move_down(corporation) }
+        when :down_per_10
+          (bundle.percent / 10).to_i.times { @stock_market.move_down(corporation) }
         when :left_block_pres
           stock_market.move_left(corporation) if was_president
         when :none
@@ -659,6 +740,10 @@ module Engine
         route.hexes.map(&:name).join('-')
       end
 
+      def float_str(entity)
+        "#{entity.percent_to_float}% to float"
+      end
+
       def routes_revenue(routes)
         routes.sum(&:revenue)
       end
@@ -677,11 +762,20 @@ module Engine
 
             tracks << [path.hex, a.num, path.lanes[0][1]] if a.edge?
             tracks << [path.hex, b.num, path.lanes[1][1]] if b.edge?
+
+            # check track between edges and towns not in center
+            # (essentially, that town needs to act like an edge for this purpose)
+            if b.edge? && a.town? && (nedge = a.tile.preferred_city_town_edges[a]) && nedge != b.num
+              tracks << [path.hex, a, path.lanes[0][1]]
+            end
+            if a.edge? && b.town? && (nedge = b.tile.preferred_city_town_edges[b]) && nedge != a.num
+              tracks << [path.hex, b, path.lanes[1][1]]
+            end
           end
         end
 
         tracks.group_by(&:itself).each do |k, v|
-          @game.game_error("Route cannot reuse track on #{k[0].id}") if v.size > 1
+          game_error("Route cannot reuse track on #{k[0].id}") if v.size > 1
         end
       end
 
@@ -790,6 +884,10 @@ module Engine
         end
 
         player.bankrupt = true
+        return unless self.class::CERT_LIMIT_CHANGE_ON_BANKRUPTCY
+
+        # Assume that games without cert limits at lower player counts retain previous counts (1817 and 2 players)
+        @cert_limit = init_cert_limit
       end
 
       def tile_lays(_entity)
@@ -889,14 +987,31 @@ module Engine
 
         # Find the highest tile that exists of this type in the tile list and duplicate it.
         # The highest one in the list should be the highest index anywhere.
-        tiles = @tiles.select { |t| t.name == tile.name }
-        new_tile = tiles.max { |a, b| a.id <=> b.id }.dup
+        tiles = @_tiles.values.select { |t| t.name == tile.name }
+        new_tile = tiles.max { |a, b| a.index <=> b.index }.dup
         @tiles << new_tile
 
         @_tiles[new_tile.id] = new_tile
         extra_cities = new_tile.cities
         @cities.concat(extra_cities)
         extra_cities.each { |c| @_cities[c.id] = c }
+      end
+
+      def after_par(corporation)
+        return unless corporation.capitalization == :incremental
+
+        all_companies_with_ability(:shares) do |company, ability|
+          next unless corporation.name == ability.shares.first.corporation.name
+
+          amount = ability.shares.sum { |share| corporation.par_price.price * share.num_shares }
+          @bank.spend(amount, corporation)
+          @log << "#{corporation.name} receives #{format_currency(amount)}
+                   from #{company.name}"
+        end
+      end
+
+      def train_help(_runnable_trains)
+        []
       end
 
       private
@@ -910,7 +1025,10 @@ module Engine
 
       def init_cert_limit
         cert_limit = self.class::CERT_LIMIT
-        cert_limit.is_a?(Hash) ? cert_limit[players.size] : cert_limit
+        cert_limit = cert_limit[players.reject(&:bankrupt).length] if cert_limit.is_a?(Hash)
+        cert_limit = cert_limit.reject { |k, _| k.to_i < @corporations.size }
+                       .min_by(&:first)&.last || cert_limit.first.last if cert_limit.is_a?(Hash)
+        cert_limit || @cert_limit
       end
 
       def init_phase
@@ -922,8 +1040,8 @@ module Engine
       end
 
       def init_stock_market
-        StockMarket.new(self.class::MARKET, self.class::CERT_LIMIT_COLORS,
-                        multiple_buy_colors: self.class::MULTIPLE_BUY_COLORS)
+        StockMarket.new(self.class::MARKET, self.class::CERT_LIMIT_TYPES,
+                        multiple_buy_types: self.class::MULTIPLE_BUY_TYPES)
       end
 
       def init_companies(players)
@@ -1259,11 +1377,20 @@ module Engine
         end
       end
 
-      def reorder_players
-        player = @players.reject(&:bankrupt)[@round.entity_index]
+      def next_sr_position(entity)
+        player_order = @round.current_entity&.player? ? @round.pass_order : @players
+        player_order.reject(&:bankrupt).index(entity)
+      end
 
-        @players.rotate!(@players.index(player))
-        @log << "#{player.name} has priority deal"
+      def reorder_players
+        case self.class::NEXT_SR_PLAYER_ORDER
+        when :after_last_to_act
+          player = @players.reject(&:bankrupt)[@round.entity_index]
+          @players.rotate!(@players.index(player))
+        when :first_to_pass
+          @players = @round.pass_order if @round.pass_order.any?
+        end
+        @log << "#{@players.first.name} has priority deal"
       end
 
       def new_auction_round
@@ -1362,6 +1489,28 @@ module Engine
         description += "#{round_number} (of #{total})" if total
 
         description.strip
+      end
+
+      def corporation_available?(_entity)
+        true
+      end
+
+      def or_description_short(turn, round)
+        "#{turn}.#{round}"
+      end
+
+      def corporation_size(_entity)
+        # For display purposes is a corporation small, medium or large
+        :small
+      end
+
+      def show_corporation_size?(_entity)
+        false
+      end
+
+      # Override this, and add elements (paragraphs of text) here to display it on Info page.
+      def timeline
+        []
       end
     end
   end

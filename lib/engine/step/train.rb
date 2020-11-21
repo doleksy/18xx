@@ -18,7 +18,11 @@ module Engine
       end
 
       def room?(entity)
-        entity.trains.reject(&:obsolete).size < @game.phase.train_limit(entity)
+        if @game.class::OBSOLETE_TRAINS_COUNT_FOR_LIMIT
+          entity.trains
+        else
+          entity.trains.reject(&:obsolete)
+        end.size < @game.phase.train_limit(entity)
       end
 
       def must_buy_train?(entity)
@@ -103,13 +107,16 @@ module Engine
 
           if @last_share_sold_price
             if @game.class::EBUY_OTHER_VALUE
-              must_spend = (entity.cash + entity.owner.cash) - @last_share_sold_price + 1
-              other_trains.reject! { |t| t.price < must_spend }
+              other_trains.reject! { |t| t.price < spend_minmax(entity, t).first }
             else
               other_trains = []
             end
           end
         end
+
+        other_trains = [] if entity.cash.zero? && !@game.class::EBUY_OTHER_VALUE
+
+        other_trains.reject! { |t| entity.cash < t.price && must_buy_at_face_value?(t, entity) }
 
         depot_trains + other_trains
       end
@@ -149,12 +156,32 @@ module Engine
       end
 
       def must_pay_face_value?(train, entity, price)
-        return if train.from_depot? || (!face_value?(entity) && !face_value?(train.owner))
+        return if train.from_depot? || !must_buy_at_face_value?(train, entity)
 
         train.price != price
       end
 
-      def face_value?(entity)
+      def must_buy_at_face_value?(train, entity)
+        face_value_ability?(entity) || face_value_ability?(train.owner)
+      end
+
+      def spend_minmax(entity, train)
+        if @game.class::EBUY_OTHER_VALUE && (entity.cash < train.price)
+          min = if @last_share_sold_price
+                  (entity.cash + entity.owner.cash) - @last_share_sold_price + 1
+                else
+                  1
+                end
+          max = [train.price, entity.cash + entity.owner.cash].min
+          [min, max]
+        else
+          [1, entity.cash]
+        end
+      end
+
+      private
+
+      def face_value_ability?(entity)
         entity.abilities(:train_buy) { |ability| return ability.face_value }
         false
       end

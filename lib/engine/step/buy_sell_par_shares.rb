@@ -83,7 +83,7 @@ module Engine
         corporation = bundle.corporation
         entity.cash >= bundle.price && can_gain?(entity, bundle) &&
           !@players_sold[entity][corporation] &&
-          (can_buy_multiple?(corporation) || !bought?)
+          (can_buy_multiple?(entity, corporation) || !bought?)
       end
 
       def must_sell?(entity)
@@ -104,6 +104,8 @@ module Engine
             corporation.operated?
           when :p_any_operate
             corporation.operated? || corporation.president?(entity)
+          when :any_time
+            true
           else
             raise NotImplementedError
           end
@@ -152,6 +154,7 @@ module Engine
         @game.stock_market.set_par(corporation, share_price)
         share = corporation.shares.first
         buy_shares(entity, share.to_bundle)
+        @game.after_par(corporation)
         @round.last_to_act = entity
         @current_actions << action
       end
@@ -159,13 +162,15 @@ module Engine
       def pass!
         super
         if @current_actions.any?
+          @round.pass_order.delete(current_entity)
           current_entity.unpass!
         else
+          @round.pass_order |= [current_entity]
           current_entity.pass!
         end
       end
 
-      def can_buy_multiple?(corporation)
+      def can_buy_multiple?(_entity, corporation)
         corporation.buy_multiple? &&
          @current_actions.none? { |x| x.is_a?(Action::Par) } &&
          @current_actions.none? { |x| x.is_a?(Action::BuyShares) && x.bundle.corporation != corporation }

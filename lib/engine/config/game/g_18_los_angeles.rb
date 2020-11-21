@@ -25,6 +25,7 @@ module Engine
     "A12": "Victorville",
     "A14": "San Bernardino",
     "B1": "Oxnard",
+    "B3": "Beverly Hills",
     "B5": "Hollywood",
     "B7": "South Pasadena",
     "B9": "Alhambra",
@@ -35,8 +36,10 @@ module Engine
     "C4": "Culver City",
     "C6": "Los Angeles",
     "C8": "Montebello",
+    "C10": "Puente",
     "C12": "Walnut",
     "C14": "Riverside",
+    "D3": "El Segundo",
     "D5": "Gardena",
     "D7": "Compton",
     "D9": "Norwalk",
@@ -48,7 +51,9 @@ module Engine
     "E8": "Long Beach",
     "E10": "Cypress",
     "E12": "Anaheim",
+    "E14": "Alta Vista",
     "E16": "Corona",
+    "F5": "San Pedro",
     "F7": "Port of Long Beach",
     "F9": "Westminster",
     "F11": "Garden Grove",
@@ -111,7 +116,7 @@ module Engine
       "value": 140,
       "treasury": 60,
       "revenue": 0,
-      "desc": "Starts with $60 Treasury and a 2T; Operates first in each OR; Lays or upgrades 1 tile; Splits revenue 50/50 with owner.",
+      "desc": "Starts with $60 in treasury, a 2 train, and a token in Gardena (D5). In ORs, this is the first minor to operate. May only lay or upgrade 1 tile per OR. Splits revenue evenly with owner. May be sold to a corporation for up to $140.",
       "sym": "GT"
     },
     {
@@ -119,18 +124,19 @@ module Engine
       "value": 100,
       "treasury": 40,
       "revenue": 0,
-      "desc": "Starts with $40 Treasury and a 2T; Operates second in each OR; Lays or upgrades 1 tile; Splits revenue 50/50 with owner.",
+      "desc": "Starts with $40 in treasury, a 2 train, and a token in Cypress (E10). In ORs, this is the second minor to operate. May only lay or upgrade 1 tile per OR. Splits revenue evenly with owner. May be sold to a corporation for up to $100.",
       "sym": "OCR"
     },
     {
       "name": "Pacific Maritime",
       "value": 60,
       "revenue": 10,
-      "desc": "Reserves location in Long Beach for an extra token at $0.",
+      "desc": "Reserves a token slot in Long Beach (E8), in the city next to Norwalk (D9). The owning corporation may place an extra token there at no cost, with no connection needed. Once this company is purchased by a corporation, the slot that was reserved may be used by other corporations.",
       "sym": "PMC",
       "abilities": [
         {
           "type": "token",
+          "when": "owning_corp_or_turn",
           "owner_type":"corporation",
           "hexes": [
             "E8"
@@ -153,7 +159,7 @@ module Engine
       "name": "United States Mail Contract",
       "value": 80,
       "revenue": 0,
-      "desc": "Adds $10 per location visited to the revenue of one train.",
+      "desc": "Adds $10 per location visited by any one train of the owning corporation. Never closes once purchased by a corporation.",
       "sym": "MAIL",
       "abilities": [
         {
@@ -167,7 +173,7 @@ module Engine
       "name": "Chino Hills Excavation",
       "value": 60,
       "revenue": 20,
-      "desc": "All hill and tunnel tile laying costs are reduce by $20.",
+      "desc": "Reduces, for the owning corporation, the cost of laying all hill tiles and tunnel/pass hexsides by $20.",
       "sym": "CHE",
       "abilities": [
         {
@@ -187,6 +193,7 @@ module Engine
       "abilities": [
         {
           "type": "assign_hexes",
+          "when": "owning_corp_or_turn",
           "hexes": [
             "C14",
             "F7"
@@ -211,6 +218,7 @@ module Engine
       "abilities": [
         {
           "type": "assign_hexes",
+          "when": "owning_corp_or_turn",
           "hexes": [
             "B1",
             "C2",
@@ -237,6 +245,7 @@ module Engine
       "abilities": [
         {
            "type":"tile_lay",
+           "when": "owning_corp_or_turn",
            "owner_type":"corporation",
            "free":true,
            "hexes":[
@@ -249,7 +258,6 @@ module Engine
               "619"
             ],
            "special": false,
-           "when":"track",
            "count": 1
         }
       ]
@@ -258,7 +266,7 @@ module Engine
       "name": "Puente Trolley",
       "value": 40,
       "revenue": 15,
-      "desc": "Extra $0 yellow tile lay in Puente (C10).",
+      "desc": "The owning corporation may lay an extra $0 cost yellow tile in Puente (C10), even if they are not connected to Puente.",
       "sym": "PT",
       "abilities": [
         {
@@ -270,6 +278,7 @@ module Engine
         },
         {
            "type":"tile_lay",
+           "when": "owning_corp_or_turn",
            "owner_type":"corporation",
            "free":true,
            "hexes":[
@@ -280,7 +289,6 @@ module Engine
               "8",
               "9"
             ],
-           "when":"track",
            "blocks":false,
            "count": 1
         }
@@ -290,7 +298,7 @@ module Engine
       "name": "Beverly Hills Carriage",
       "value": 40,
       "revenue": 15,
-      "desc": "Extra $0 yellow tile lay in Beverly Hills (B3)",
+      "desc": "The owning corporation may lay an extra $0 cost yellow tile in Beverly Hills (B3), even if they are not connected to Beverly Hills. Any terrain costs are ignored.",
       "sym": "BHC",
       "abilities": [
         {
@@ -302,6 +310,7 @@ module Engine
         },
         {
            "type":"tile_lay",
+           "when": "owning_corp_or_turn",
            "owner_type":"corporation",
            "free":true,
            "hexes":[
@@ -312,9 +321,56 @@ module Engine
               "8",
               "9"
             ],
-           "when":"track",
            "blocks": false,
            "count": 1
+        }
+      ]
+    },
+    {
+      "name": "Dewey, Cheatham, and Howe",
+      "value": 40,
+      "revenue": 10,
+      "desc": "The owning corporation may place a token (from their charter, paying the normal cost) in a city they are connected to that does not have any open token slots. If a later tile placement adds a new slot, this token fills that slot. This ability may not be used in Long Beach (E8).",
+      "sym": "DC&H",
+      "min_players": 3,
+      "abilities": [
+        {
+          "type": "token",
+          "when": "owning_corp_or_turn",
+          "owner_type":"corporation",
+          "count": 1,
+          "from_owner": true,
+          "cheater": 0,
+          "discount": 0,
+          "hexes": [
+            "A2", "A4", "A6", "A8", "B5", "B7", "B9", "B11", "B13", "C2", "C4",
+            "C6", "C8", "C12", "D5", "D7", "D9", "D11", "D13", "E4", "E6",
+            "E10", "E12", "F7", "F9", "F11", "F13"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Los Angeles Title",
+      "value": 40,
+      "revenue": 10,
+      "desc": "The owning corporation may place an Open City token in any unreserved slot except for Long Beach (E8). The owning corporation need not be connected to the city where the token is placed.",
+      "sym": "LAT",
+      "min_players": 3,
+      "abilities": [
+        {
+          "type": "token",
+          "when": "owning_corp_or_turn",
+          "owner_type":"corporation",
+          "price": 0,
+          "teleport_price": 0,
+          "count": 1,
+          "neutral": true,
+          "hexes": [
+            "A4", "A6", "A8", "B5", "B7", "B9", "B11", "B13", "C4", "C6", "C8",
+            "C12", "D5", "D7", "D9", "D11", "D13", "E4", "E6", "E10", "E12",
+            "F7", "F9", "F11", "F13"
+          ]
         }
       ]
     }
@@ -356,7 +412,7 @@ module Engine
       "abilities": [
         {
           "type": "token",
-          "description": "Reserved $40/$60 Culver City token",
+          "description": "Reserved $40/$60 Culver City (C4) token",
           "hexes": [
             "C4"
           ],
@@ -388,7 +444,7 @@ module Engine
       "abilities": [
         {
           "type": "token",
-          "description": "Reserved $40 Alhambra token",
+          "description": "Reserved $40 Alhambra (B9) token",
           "hexes": [
             "B9"
           ],
@@ -453,7 +509,7 @@ module Engine
       "abilities": [
         {
           "type": "token",
-          "description": "Reserved $40 Montebello token",
+          "description": "Reserved $40 Montebello (C8) token",
           "hexes": [
             "C8"
           ],
@@ -486,7 +542,7 @@ module Engine
       "abilities": [
         {
           "type": "token",
-          "description": "Reserved $40/$100 Los Angeles token",
+          "description": "Reserved $40/$100 Los Angeles (C6) token",
           "hexes": [
             "C6"
           ],
@@ -496,7 +552,6 @@ module Engine
         },
         {
           "type": "reservation",
-          "slot": 1,
           "hex": "C6",
           "remove": "IV"
         }

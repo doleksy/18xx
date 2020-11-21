@@ -38,6 +38,10 @@ module Engine
         @laid_track += 1
       end
 
+      def tile_lay_abilities(entity, &block)
+        entity.abilities(:tile_lay, &block)
+      end
+
       def lay_tile(action, extra_cost: 0, entity: nil, spender: nil)
         entity ||= action.entity
         spender ||= entity
@@ -73,7 +77,7 @@ module Engine
         free = false
         discount = 0
 
-        entity.abilities(:tile_lay) do |ability|
+        tile_lay_abilities(entity) do |ability|
           next if ability.hexes.any? && (!ability.hexes.include?(hex.id) || !ability.tiles.include?(tile.name))
 
           @game.game_error("Track laid must be connected to one of #{spender.id}'s stations") if ability.reachable &&
@@ -83,6 +87,7 @@ module Engine
 
           free = ability.free
           discount = ability.discount
+          extra_cost += ability.cost
         end
 
         entity.abilities(:teleport) do |ability, _|
@@ -92,6 +97,9 @@ module Engine
         terrain = old_tile.terrain
         cost =
           if free
+            # call for the side effect of deleting a completed border cost
+            border_cost(tile, entity)
+
             extra_cost
           else
             border, border_types = border_cost(tile, entity)
@@ -123,7 +131,7 @@ module Engine
         return unless terrain.any?
 
         @game.all_companies_with_ability(:tile_income) do |company, ability|
-          if terrain.include?(ability.terrain) && (!ability.owner_only || company.owner == action.entity)
+          if terrain.include?(ability.terrain) && (!ability.owner_only || company.owner == entity)
             # If multiple borders are connected bonus counts each individually
             income = ability.income * terrain.find_all { |t| t == ability.terrain }.size
             @game.bank.spend(income, company.owner)
@@ -184,6 +192,8 @@ module Engine
         case @game.class::TRACK_RESTRICTION
         when :permissive
           true
+        when :city_permissive
+          @game.game_error('Must be city tile or use new track') if new_tile.cities.none? && !used_new_track
         when :restrictive
           @game.game_error('Must use new track') unless used_new_track
         when :semi_restrictive

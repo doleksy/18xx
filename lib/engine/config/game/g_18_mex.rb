@@ -7,11 +7,11 @@
 module Engine
   module Config
     module Game
-      module G18MEX
+      module G18Mex
         JSON = <<-'DATA'
 {
    "filename":"18_mex",
-   "modulename":"18MEX",
+   "modulename":"18Mex",
    "currencyFormatStr":"$%d",
    "bankCash":9000,
    "certLimit":{
@@ -33,6 +33,7 @@ module Engine
       "B3":"Nogales / Tuscon",
       "D3":"Hermosillo",
       "E6":"Chihuahua",
+      "F5":"Copper Canyon",
       "D11":"San Antonio",
       "G10":"Nuevo Laredo",
       "I4":"Los Mochis",
@@ -103,7 +104,7 @@ module Engine
       "471":1,
       "472":1,
       "473":1,
-      "474":1,
+      "474":2,
       "475":1,
       "476":1,
       "477":1,
@@ -143,7 +144,7 @@ module Engine
          "color":"brown",
          "code":"town=revenue:10;path=a:2,b:_0,a_lane:2.1;path=a:5,b:_0;path=a:2,b:4,a_lane:2.0;label=P"
       },
-      "619":1
+      "619":2
    },
    "market":[
       [
@@ -252,7 +253,7 @@ module Engine
          "name":"Kansas City, Mexico, & Orient Railroad",
          "value":40,
          "revenue":10,
-         "desc":"Owning corporation may place the non-upgradable Copper Canyan tile in E6 for $60 (instead of the normal $120) unless that hex is already built. The tile lay does not have to be connected to an existing station token of the owning corporation. The lay does not count toward the normal lay limit but must be done during tile lay.",
+         "desc":"Owning corporation may place the non-upgradable Copper Canyon tile in F5 for $60 (instead of the normal $120) unless that hex is already built. The tile lay does not have to be connected to an existing station token of the owning corporation. The lay does not count toward the normal lay limit but must be done during tile lay.",
          "abilities": [
             {
               "type": "tile_lay",
@@ -279,11 +280,6 @@ module Engine
             {
               "type": "no_buy",
               "owner_type": "player"
-            },
-            {
-               "type": "close",
-               "when": "3½",
-               "owner_type": "player"
             }
          ]
       },
@@ -297,11 +293,6 @@ module Engine
             {
               "type": "no_buy",
               "owner_type": "player"
-            },
-            {
-               "type": "close",
-               "when": "3½",
-               "owner_type": "player"
             }
          ]
       },
@@ -315,11 +306,6 @@ module Engine
             {
               "type": "no_buy",
               "owner_type": "player"
-            },
-            {
-               "type": "close",
-               "when": "3½",
-               "owner_type": "player"
             }
          ]
       },
@@ -458,14 +444,20 @@ module Engine
       },
       {
          "float_percent":50,
-         "sym":"PAC",
-         "name":"Pacific Railroad",
-         "logo":"18_mex/PAC",
+         "sym":"FCP",
+         "name":"Ferrocarril del Pacífico (Pacific Railroad)",
+         "logo":"18_mex/FCP",
          "tokens":[
             0,
             40,
             60,
             80
+         ],
+         "abilities": [
+            {
+               "type": "base",
+               "description": "Cannot be merged into NdM"
+            }
          ],
          "coordinates":"B3",
          "color":"yellow",
@@ -479,6 +471,12 @@ module Engine
          "tokens":[
             0,
             40
+         ],
+         "abilities": [
+            {
+               "type": "base",
+               "description": "Cannot be merged into NdM"
+            }
          ],
          "coordinates":"I12",
          "color":"orange"
@@ -568,7 +566,10 @@ module Engine
          ],
          "price":180,
          "num":4,
-         "rusts_on":"6"
+         "rusts_on":"6",
+         "events":[
+            {"type": "companies_buyable"}
+         ]
       },
       {
          "name":"3'",
@@ -698,7 +699,8 @@ module Engine
                   "offboard"
                ],
                "pay":4,
-               "visit":4
+               "visit":4,
+               "multiplier":2
             },
             {
                "nodes":[
@@ -753,7 +755,9 @@ module Engine
             "H5",
             "I6",
             "N9",
-            "P9",
+            "P9"
+         ],
+         "upgrade=cost:120,terrain:mountain;icon=image:18_al/coal":[
             "F5"
          ],
          "upgrade=cost:120,terrain:mountain;border=edge:4,type:impassable":[
@@ -836,7 +840,7 @@ module Engine
          "city=revenue:20,loc:center;town=revenue:10,loc:4;path=a:_0,b:_1;upgrade=cost:40,terrain:swamp;label=T":[
             "M12"
          ],
-         "city=revenue:0,loc:center;town=revenue:0,loc:5;upgrade=cost:40,terrain:swamp;label=V":[
+         "city=revenue:0,loc:center;town=revenue:0,loc:5;upgrade=cost:40,terrain:swamp;border=edge:2,type:impassable;label=V":[
             "P13"
          ],
          "town=revenue:0;upgrade=cost:120,terrain:mountain":[
@@ -850,10 +854,10 @@ module Engine
          "city=revenue:20;path=a:0,b:_0;path=a:1,b:_0;path=a:3,b:_0":[
             "E6"
          ],
-         "city=revenue:20,loc:center;town=revenue:0,loc:2;path=a:3,b:_0;path=a:5,b:_0;label=MC":[
+         "city=revenue:20,loc:center;town=revenue:0,loc:2;path=a:3,b:_0;path=a:5,b:_0;border=edge:4,type:impassable;label=MC":[
             "O10"
          ],
-         "town=revenue:10;path=a:2,b:_0;path=a:_0,b:5;upgrade=cost:60,terrain:mountain;label=P":[
+         "town=revenue:10;path=a:2,b:_0;path=a:_0,b:5;upgrade=cost:60,terrain:mountain;border=edge:0,type:impassable;border=edge:1,type:impassable;border=edge:3,type:impassable;label=P":[
             "P11"
          ],
          "path=a:1,b:4;upgrade=cost:60,terrain:mountain":[

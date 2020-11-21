@@ -100,9 +100,20 @@ module Engine
                               visit_cost: params['visit_cost'],
                               route: params['route'],
                               format: params['format'],
-                              loc: params['loc'])
+                              loc: params['loc'],
+                              to_city: params['to_city'])
         cache << town
         town
+      when 'halt'
+        halt = Part::Halt.new(params['symbol'],
+                              groups: params['groups'],
+                              hide: params['hide'],
+                              visit_cost: params['visit_cost'],
+                              route: params['route'],
+                              format: params['format'],
+                              loc: params['loc'])
+        cache << halt
+        halt
       when 'offboard'
         offboard = Part::Offboard.new(params['revenue'],
                                       groups: params['groups'],
@@ -229,10 +240,16 @@ module Engine
     end
 
     def paths_are_subset_of?(other_paths)
-      ALL_EDGES.any? do |ticks|
-        @paths.all? do |path|
-          path = path.rotate(ticks)
-          other_paths.any? { |other| path <= other }
+      if @junction && other_paths.any?(&:junction)
+        # Upgrading from a Lawson tile to a Lawson tile is a special case
+        other_exits = other_paths.flat_map(&:exits).uniq
+        ALL_EDGES.any? { |ticks| (exits - other_exits.map { |e| (e + ticks) % 6 }).empty? }
+      else
+        ALL_EDGES.any? do |ticks|
+          @paths.all? do |path|
+            path = path.rotate(ticks)
+            other_paths.any? { |other| path <= other }
+          end
         end
       end
     end

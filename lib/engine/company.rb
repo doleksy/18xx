@@ -44,10 +44,10 @@ module Engine
     def close!
       @closed = true
 
-      all_abilities.each { |a| remove_ability(a) }
+      all_abilities.dup.each { |a| remove_ability(a) }
       return unless owner
 
-      owner.companies.delete(self)
+      owner.companies.delete(self) if owner.respond_to?(:companies)
       @owner = nil
     end
 
@@ -57,6 +57,14 @@ module Engine
 
     def company?
       true
+    end
+
+    def border?
+      false
+    end
+
+    def path?
+      false
     end
 
     def find_token_by_type(token_type)

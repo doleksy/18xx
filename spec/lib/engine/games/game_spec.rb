@@ -15,6 +15,24 @@ module Engine
         'mfmise' => 6550,
         'sirstevie3' => 4907,
       },
+      11_181 => {
+        'zhaoyi93' => 2659,
+        'Oedipussy Rex' => 2090,
+        'beardbru' => 1930,
+        'Fritz von Catan' => 1058,
+        'George' => 0,
+      },
+      12_666 => {
+        'gragatrim' => 6180,
+        'the_seaward' => 4950,
+        'hoolaking' => 1803,
+      },
+      'hs_ymymwsiv_16134' => {
+        'Akado' => 1868,
+        'Ariel' => 1966,
+        'EdFactor' => 1573,
+        'Patrick of the Isles' => 0,
+      },
       # bankruptcy sending a corp into receivership, unable to buy a train on
       # the turn of the bankruptcy, and then buying a train on its next turn
       # thanks to company income; also includes emergency share issuing
@@ -47,6 +65,15 @@ module Engine
       'hs_pzdxtics_1601680033' => {
         'A' => 4312,
         'B' => 2264,
+      },
+    },
+    GAMES_BY_TITLE['18 Los Angeles'] => {
+      'hs_srwgrtvq_1602711223' => {
+        'Player 2' => 8287,
+        'Player 3' => 7960,
+        'Player 1' => 7749,
+        'Player 5' => 6739,
+        'Player 4' => 4647,
       },
     },
     GAMES_BY_TITLE['18Chesapeake'] => {
@@ -143,12 +170,18 @@ module Engine
         'LJHall' => 5382,
         'Helen ' => 3978,
       },
+      9487 => {
+        'Cogust' => 5032,
+        '1mmm' => 4500,
+        'piton' => 4049,
+        'ChrisShaffer' => 3673,
+      },
     },
     GAMES_BY_TITLE['18MS'] => {
-      9882 => {
-        'TIE53' => 4407,
-        'Mark Derrick' => 3783,
-        'MontyBrewster71' => 3357,
+      14_375 => {
+        'A Steaming Kyle' => 3685,
+        'kjlevs89' => 3259,
+        'PJBarns' => 2301,
       },
     },
     GAMES_BY_TITLE['18TN'] => {
@@ -159,6 +192,30 @@ module Engine
         'MontyBrewster71' => 4354,
       },
     },
+    GAMES_BY_TITLE['1817'] => {
+      # Temporary until a fuller game is finished
+      13_707 => {
+        'sandholm' => 1458,
+        'tdh' => 989,
+        'tdh_test' => 420,
+      },
+      # This game is in progress, and will be updated
+      15_528 => {
+          'PedroS' => 5058,
+          'FCR' => 3349,
+          'daniel.sousa.me' => 5722,
+          'Zebsagaz' => 2421,
+      },
+    },
+    GAMES_BY_TITLE['18MEX'] => {
+      13_315 => {
+        'Jen Freeman' => 4156,
+        'Cogust' => 3872,
+        'Swedish-Per (GMT+2)' => 3499,
+        'LenaC' => 3440,
+        'shingoi' => 3388,
+      },
+    },
   }.freeze
 
   TEST_CASES.each do |game, results|
@@ -166,9 +223,9 @@ module Engine
       results.each do |game_id, result|
         context game_id do
           it 'matches result exactly' do
-            game_path = game.title.gsub(/ /, '_').gsub(/([^_])([A-Z])/, '\1_\2').downcase
+            game_path = game.title.gsub(/ /, '_').gsub(/([0-9])([A-Z])/, '\1_\2').downcase
             data = JSON.parse(File.read("spec/fixtures/#{game_path}/#{game_id}.json"))
-            players = data['players'].map { |p| p['name'] }
+            players = data['players'].map { |p| [p['id'] || p['name'], p['name']] }.to_h
             expect(game.new(players, id: game_id, actions: data['actions']).result).to eq(result)
             rungame = game.new(players, id: game_id, actions: data['actions'], strict: true)
             expect(rungame.result).to eq(result)

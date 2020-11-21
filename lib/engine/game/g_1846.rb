@@ -23,7 +23,7 @@ module Engine
       GAME_LOCATION = 'Midwest, USA'
       GAME_RULES_URL = 'https://s3-us-west-2.amazonaws.com/gmtwebsiteassets/1846/1846-RULES-GMT.pdf'
       GAME_DESIGNER = 'Thomas Lehmann'
-      GAME_PUBLISHER = Publisher::INFO[:gmt_games]
+      GAME_PUBLISHER = %i[gmt_games golden_spike].freeze
       GAME_INFO_URL = 'https://github.com/tobymao/18xx/wiki/1846'
 
       POOL_SHARE_DROP = :one
@@ -53,12 +53,13 @@ module Engine
       SOUTH_GROUP = %w[B&O C&O IC].freeze
 
       REMOVED_CORP_SECOND_TOKEN = {
-        'D14' => ['GT'],
-        'D20' => ['ERIE'],
-        'E11' => ['PRR'],
-        'E17' => ['NYC'],
-        'G7' => ['IC'],
-        'H12' => ['B&O', 'C&O'],
+        'B&O' => 'H12',
+        'C&O' => 'H12',
+        'ERIE' => 'D20',
+        'GT' => 'D14',
+        'IC' => 'G7',
+        'NYC' => 'E17',
+        'PRR' => 'E11',
       }.freeze
 
       LSL_HEXES = %w[D14 E17].freeze
@@ -66,6 +67,8 @@ module Engine
 
       MEAT_HEXES = %w[D6 I1].freeze
       STEAMBOAT_HEXES = %w[B8 C5 D14 I1 G19].freeze
+
+      MEAT_REVENUE_DESC = 'Meat-Packing'
 
       TILE_COST = 20
       EVENTS_TEXT = Base::EVENTS_TEXT.merge('remove_tokens' => ['Remove Tokens', 'Remove private company tokens']).freeze
@@ -101,38 +104,8 @@ module Engine
         two_player? ? 0 : players.size
       end
 
-      def cert_limit
-        num_corps = @corporations.size
-        case @players.size
-        when 2
-          num_corps == 5 ? 19 : 16
-        when 3
-          num_corps == 5 ? 14 : 11
-        when 4
-          case num_corps
-          when 6
-            12
-          when 5
-            10
-          else
-            8
-          end
-        when 5
-          case num_corps
-          when 7
-            11
-          when 6
-            10
-          when 5
-            8
-          else
-            6
-          end
-        end
-      end
-
       def setup
-        @turn = two_player? ? 0 : 1
+        @turn = setup_turn
 
         # When creating a game the game will not have enough to start
         return unless @players.size.between?(*Engine.player_range(self.class))
@@ -154,12 +127,14 @@ module Engine
         corporation_removal_groups.each do |group|
           remove_from_group!(group, @corporations) do |corporation|
             place_home_token(corporation)
-            place_second_token(corporation)
             corporation.abilities(:reservation) do |ability|
               corporation.remove_ability(ability)
             end
+            place_second_token(corporation)
           end
         end
+
+        @cert_limit = init_cert_limit
 
         @companies.each do |company|
           company.min_price = 1
@@ -176,6 +151,10 @@ module Engine
         end
 
         @last_action = nil
+      end
+
+      def setup_turn
+        two_player? ? 0 : 1
       end
 
       def remove_from_group!(group, entities)
@@ -203,17 +182,13 @@ module Engine
         two_player? ? [NORTH_GROUP, SOUTH_GROUP] : [GREEN_GROUP]
       end
 
-      def place_second_token(corporation)
-        return unless two_player?
+      def place_second_token(corporation, two_player_only: true, cheater: 1)
+        return if two_player_only && !two_player?
 
-        if corporation.id == 'ERIE'
-          token = corporation.find_token_by_type
-          hex_by_id('D20').tile.cities.first.place_token(corporation, token, check_tokenable: false)
-          @log << 'ERIE places a token on D20'
-        else
-          hex = self.class::REMOVED_CORP_SECOND_TOKEN.find { |_h, corps| corps.include?(corporation.name) }.first
-          @log << "#{corporation.name} will place a second token on #{hex} when a green tile is laid there"
-        end
+        hex_id = self.class::REMOVED_CORP_SECOND_TOKEN[corporation.id]
+        token = corporation.find_token_by_type
+        hex_by_id(hex_id).tile.cities.first.place_token(corporation, token, check_tokenable: false, cheater: cheater)
+        @log << "#{corporation.id} places a token on #{hex_id}"
       end
 
       def num_trains(train)
@@ -275,7 +250,7 @@ module Engine
         end.join('-')
 
         meat = meat_packing.id
-        str += ' + Meat-Packing' if route.corporation.assigned?(meat) && stops.any? { |stop| stop.hex.assigned?(meat) }
+        str += " + #{self.class::MEAT_REVENUE_DESC}" if route.corporation.assigned?(meat) && stops.any? { |stop| stop.hex.assigned?(meat) }
 
         steam = steamboat.id
         str += ' + Port' if route.corporation.assigned?(steam) && (stops.map(&:hex).find { |hex| hex.assigned?(steam) })
@@ -323,6 +298,10 @@ module Engine
         @illinois_central ||= corporation_by_id('IC')
       end
 
+      def preprocess_action(action)
+        check_special_tile_lay(action) unless psuedo_special_tile_lay?(action)
+      end
+
       def action_processed(action)
         case action
         when Action::Par
@@ -332,8 +311,6 @@ module Engine
             @bank.spend(bonus, illinois_central)
             @log << "#{illinois_central.name} receives a #{format_currency(bonus)} subsidy"
           end
-        when Action::LayTile
-          check_removed_corp_second_token(action.hex, action.tile) if two_player?
         end
 
         check_special_tile_lay(action)
@@ -348,6 +325,11 @@ module Engine
       def special_tile_lay?(action)
         (action.is_a?(Action::LayTile) &&
          (action.entity == michigan_central || action.entity == ohio_indiana))
+      end
+
+      def psuedo_special_tile_lay?(action)
+        (action.is_a?(Action::LayTile) &&
+         (action.entity == michigan_central&.owner || action.entity == ohio_indiana&.owner))
       end
 
       def check_special_tile_lay(action)
@@ -391,6 +373,8 @@ module Engine
         else
           @minors.delete(corporation)
         end
+
+        @cert_limit = init_cert_limit
       end
 
       def init_round
@@ -558,17 +542,6 @@ module Engine
         []
       end
 
-      def check_removed_corp_second_token(hex, tile)
-        return unless tile.color.to_sym == :green
-        return unless (corp_ids = self.class::REMOVED_CORP_SECOND_TOKEN[hex.id])
-        return unless (corp = @removals.find { |c| corp_ids.include?(c.id) })
-        return if corp.id == 'ERIE' # their second token is placed during setup
-
-        token = corp.find_token_by_type
-        @log << "#{corp.name} places a token on #{hex.name}"
-        tile.cities.first.place_token(corp, token, check_tokenable: false)
-      end
-
       def next_round!
         return super if !two_player? || @draft_finished
 
@@ -604,6 +577,30 @@ module Engine
             values[:final_train] = :one_more_full_or_set if two_player?
             values
           end
+      end
+
+      def east_west_desc
+        'E/W'
+      end
+
+      def train_help(runnable_trains)
+        help = []
+
+        nm_trains = runnable_trains.select { |t| t.name.include?('/') }
+
+        if nm_trains.any?
+          corporation = nm_trains.first.owner
+          trains = nm_trains.map(&:name).uniq.sort.join(', ')
+          help << "N/M trains (#{trains}) may visit M locations, but only "\
+                  'earn revenue from the best combination of N locations.'
+          help << "One of the N locations must include a #{corporation.name} "\
+                  'token.'
+          help << 'In order for an N/M train to earn bonuses for an '\
+                  "#{east_west_desc} route, both of the #{east_west_desc} "\
+                  'locations must be counted among the N locations.'
+        end
+
+        help
       end
     end
   end
