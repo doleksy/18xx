@@ -201,19 +201,27 @@ module Engine
       },
       # This game is in progress, and will be updated
       15_528 => {
-          'PedroS' => 5058,
-          'FCR' => 3349,
-          'daniel.sousa.me' => 5722,
-          'Zebsagaz' => 2421,
+          'PedroS' => 10_127,
+          'FCR' => 7066,
+          'daniel.sousa.me' => 11_490,
+          'Zebsagaz' => 6257,
       },
     },
     GAMES_BY_TITLE['18MEX'] => {
       13_315 => {
-        'Jen Freeman' => 4156,
-        'Cogust' => 3872,
-        'Swedish-Per (GMT+2)' => 3499,
-        'LenaC' => 3440,
-        'shingoi' => 3388,
+        'Jen Freeman' => 3255,
+        'Cogust' => 3170,
+        'LenaC' => 2752,
+        'Swedish-Per (GMT+2)' => 2343,
+        'shingoi' => 2436,
+      },
+      # No optional rules, Declined NdM merge, Declared bankrupcy
+      17_849 => {
+        'Matchstick' => 601,
+        'ventusignis' => 485,
+        'heliopolix' => 470,
+        'ThePymonster' => 363,
+        'TIE53' => 320,
       },
     },
   }.freeze

@@ -10,7 +10,7 @@ module Engine
       attr_accessor :index, :tile
 
       def id
-        "#{tile.id}-#{index}"
+        @id ||= "#{tile.id}-#{index}"
       end
 
       def hex
@@ -98,6 +98,10 @@ module Engine
       end
 
       def stub?
+        false
+      end
+
+      def partition?
         false
       end
 

@@ -109,20 +109,21 @@ module View
         if discountable_trains.any?
           children << h(:h3, h3_props, 'Exchange Trains')
 
-          discountable_trains.each do |train, discount_train, price|
+          discountable_trains.each do |train, discount_train, variant, price|
             exchange_train = lambda do
               process_action(
                 Engine::Action::BuyTrain.new(
                   @corporation,
                   train: discount_train,
                   price: price,
+                  variant: variant,
                   exchange: train,
                 )
               )
             end
 
             children << h(:div, [
-              "#{train.name} -> #{discount_train.name} #{@game.format_currency(price)} ",
+              "#{train.name} -> #{variant} #{@game.format_currency(price)} ",
               h('button.no_margin', { on: { click: exchange_train } }, 'Exchange'),
             ])
           end
@@ -132,7 +133,8 @@ module View
         children << remaining_trains
 
         children << h(:div, "#{@corporation.name} has #{@game.format_currency(@corporation.cash)}.")
-        if (issuable_cash = @game.emergency_issuable_cash(@corporation)).positive?
+        if step.issuable_shares(@corporation).any? &&
+           (issuable_cash = @game.emergency_issuable_cash(@corporation)).positive?
           children << h(:div, "#{@corporation.name} can issue shares to raise up to "\
                               "#{@game.format_currency(issuable_cash)} (the corporation "\
                               'must issue shares before the president may contribute).')
@@ -162,6 +164,7 @@ module View
             price = variant[:price]
             president_assist, _fee = @game.president_assisted_buy(@corporation, train, price)
             price = @ability&.discounted_price(train, price) || price
+            price = @game.discard_discount(train, price)
 
             buy_train = lambda do
               process_action(Engine::Action::BuyTrain.new(

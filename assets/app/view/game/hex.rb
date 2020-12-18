@@ -31,6 +31,9 @@ module View
       needs :actions, default: []
       needs :entity, default: nil
       needs :unavailable, default: nil
+      needs :show_coords, default: nil
+      needs :show_location_names, default: true
+      needs :routes, default: []
 
       def render
         return nil if @hex.empty
@@ -42,8 +45,16 @@ module View
           else
             @hex.tile
           end
-        children = [h(:polygon, attrs: { points: Lib::Hex::POINTS })]
-        children << h(Tile, tile: @tile) if @tile
+        children = hex_outline
+        if @tile
+          children << h(
+            Tile,
+            tile: @tile,
+            show_coords: @show_coords && (@role == :map),
+            show_location_names: @show_location_names,
+            routes: @routes
+          )
+        end
         children << h(TriangularGrid) if Lib::Params['grid']
         children << h(TileUnavailable, unavailable: @unavailable, layout: @hex.layout) if @unavailable
 
@@ -62,6 +73,24 @@ module View
         props[:on] = { click: ->(e) { on_hex_click(e) } }
         props[:attrs]['stroke-width'] = 5 if @selected
         h(:g, props, children)
+      end
+
+      def hex_outline
+        polygon_props = { attrs: { points: Lib::Hex::POINTS } }
+
+        invisible_edges = @tile.borders.select { |b| b.type.nil? }.map(&:edge) if @tile
+        if invisible_edges&.any?
+          polygon_props[:attrs][:stroke] = 'none'
+          shapes = [h(:polygon, polygon_props)]
+
+          (Engine::Tile::ALL_EDGES - invisible_edges).each do |edge|
+            shapes << h(:path, attrs: { d: Lib::Hex::EDGE_PATHS[edge] })
+          end
+
+          shapes
+        else
+          [h(:polygon, polygon_props)]
+        end
       end
 
       def translation
@@ -85,7 +114,9 @@ module View
       def on_hex_click
         return if @actions.empty? && @role != :tile_page
 
-        return store(:tile_selector, nil) if !@clickable || (@hex == @tile_selector&.hex && !@tile_selector.tile)
+        if !@clickable || (@hex == @tile_selector&.hex && !(@tile_selector.respond_to?(:tile) && @tile_selector.tile))
+          return store(:tile_selector, nil)
+        end
 
         nodes = @hex.tile.nodes
 

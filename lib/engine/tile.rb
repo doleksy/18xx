@@ -15,9 +15,9 @@ module Engine
     include Config::Tile
 
     attr_accessor :hex, :icons, :index, :legal_rotations, :location_name, :name, :reservations
-    attr_reader :blocks_lay, :borders, :cities, :color, :edges, :junction, :label, :nodes,
+    attr_reader :blocks_lay, :borders, :cities, :color, :edges, :junction, :nodes, :label,
                 :parts, :preprinted, :rotation, :stops, :towns, :upgrades, :offboards, :blockers,
-                :city_towns, :unlimited, :stubs
+                :city_towns, :unlimited, :stubs, :partitions, :id
 
     ALL_EDGES = [0, 1, 2, 3, 4, 5].freeze
 
@@ -69,6 +69,8 @@ module Engine
             [k, v]
           when 'lanes'
             [k, v.to_i]
+          when 'track'
+            [k, v.to_sym]
           else
             case v[0]
             when '_'
@@ -81,7 +83,8 @@ module Engine
 
         Part::Path.make_lanes(params['a'], params['b'], terminal: params['terminal'],
                                                         lanes: params['lanes'], a_lane: params['a_lane'],
-                                                        b_lane: params['b_lane'])
+                                                        b_lane: params['b_lane'],
+                                                        track: params['track'])
       when 'city'
         city = Part::City.new(params['revenue'],
                               slots: params['slots'],
@@ -125,11 +128,9 @@ module Engine
         offboard
       when 'label'
         label = Part::Label.new(params)
-        cache << label
         label
       when 'upgrade'
         upgrade = Part::Upgrade.new(params['cost'], params['terrain']&.split('|'))
-        cache << upgrade
         upgrade
       when 'border'
         Part::Border.new(params['edge'], params['type'], params['cost'])
@@ -141,6 +142,8 @@ module Engine
         Part::Icon.new(params['image'], params['name'], params['sticky'], params['blocks_lay'])
       when 'stub'
         Part::Stub.new(params['edge'].to_i)
+      when 'partition'
+        Part::Partition.new(params['a'], params['b'], params['type'], params['restrict'])
       end
     end
 
@@ -162,6 +165,7 @@ module Engine
       @cities = []
       @paths = []
       @stubs = []
+      @partitions = []
       @towns = []
       @city_towns = []
       @all_stop = []
@@ -183,6 +187,7 @@ module Engine
       @blocks_lay = nil
       @reservation_blocks = opts[:reservation_blocks] || false
       @unlimited = opts[:unlimited] || false
+      @id = "#{@name}-#{@index}"
 
       separate_parts
     end
@@ -199,10 +204,6 @@ module Engine
                location_name: @location_name,
                reservation_blocks: @reservation_blocks,
                unlimited: @unlimited)
-    end
-
-    def id
-      "#{@name}-#{@index}"
     end
 
     def <=>(other)
@@ -237,6 +238,12 @@ module Engine
 
     def terrain
       @upgrades.flat_map(&:terrains).uniq
+    end
+
+    # if tile has more than one intra-tile paths, connections using those paths
+    # cannot be identified with just a hex name
+    def ambiguous_connection?
+      @ambiguous_connection ||= @paths.count { |p| p.nodes.size > 1 } > 1
     end
 
     def paths_are_subset_of?(other_paths)
@@ -493,16 +500,16 @@ module Engine
           @icons << part
         elsif part.stub?
           @stubs << part
+        elsif part.partition?
+          @partitions << part
         else
           raise "Part #{part} not separated."
         end
       end
 
-      @parts.each.group_by(&:class).values.each do |parts|
-        parts.each.with_index do |part, index|
-          part.index = index
-          part.tile = self
-        end
+      @parts.each_with_index do |part, idx|
+        part.index = idx
+        part.tile = self
       end
 
       @nodes = @paths.flat_map(&:nodes).uniq

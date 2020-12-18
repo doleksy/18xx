@@ -19,9 +19,9 @@ module Engine
         name: 'Grand Trunk Games',
         url: 'https://www.grandtrunkgames.com/',
       },
-      mayfair_games: {
-        name: 'Mayfair Games',
-        url: '',
+      oo_games: {
+        name: 'Double-O Games',
+        url: 'http://ohley.de/english/',
       },
       sea_horse: {
         name: 'Sea Horse Laser & Design',

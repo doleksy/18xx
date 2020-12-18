@@ -3,6 +3,7 @@
 # frozen_string_literal: true
 
 require_relative '../config/game/g_1846'
+require_relative 'company_price_up_to_face'
 require_relative 'base'
 
 module Engine
@@ -81,7 +82,9 @@ module Engine
       # Two tiles can be laid, only one upgrade
       TILE_LAYS = [{ lay: true, upgrade: true }, { lay: true, upgrade: :not_if_upgraded }].freeze
 
-      IPO_NAME = 'Treasury'
+      def ipo_name(_entity = nil)
+        'Treasury'
+      end
 
       def corporation_opts
         two_player? ? { max_ownership_percent: 70 } : {}
@@ -103,6 +106,8 @@ module Engine
       def num_pass_companies(players)
         two_player? ? 0 : players.size
       end
+
+      include CompanyPriceUpToFace
 
       def setup
         @turn = setup_turn
@@ -136,10 +141,8 @@ module Engine
 
         @cert_limit = init_cert_limit
 
-        @companies.each do |company|
-          company.min_price = 1
-          company.max_price = company.value
-        end
+        setup_company_price_up_to_face
+
         @draft_finished = false
 
         @minors.each do |minor|
@@ -315,9 +318,7 @@ module Engine
 
         check_special_tile_lay(action)
 
-        @corporations.dup.each do |corporation|
-          close_corporation(corporation) if corporation.share_price&.price&.zero?
-        end
+        super
 
         @last_action = action
       end
@@ -340,41 +341,6 @@ module Engine
 
         company.remove_ability(ability)
         @log << "#{company.name} forfeits second tile lay."
-      end
-
-      def close_corporation(corporation, quiet: false)
-        @log << "#{corporation.name} closes" unless quiet
-
-        hexes.each do |hex|
-          hex.tile.cities.each do |city|
-            if city.tokened_by?(corporation) || city.reserved_by?(corporation)
-              city.tokens.map! { |token| token&.corporation == corporation ? nil : token }
-              city.reservations.delete(corporation)
-            end
-          end
-        end
-
-        corporation.spend(corporation.cash, @bank) if corporation.cash.positive?
-        corporation.trains.each { |t| t.buyable = false }
-        if corporation.companies.any?
-          @log << "#{corporation.name}'s companies close: #{corporation.companies.map(&:sym).join(', ')}"
-          corporation.companies.dup.each(&:close!)
-        end
-        @round.force_next_entity! if @round.current_entity == corporation
-
-        if corporation.corporation?
-          corporation.share_holders.keys.each do |share_holder|
-            share_holder.shares_by_corporation.delete(corporation)
-          end
-
-          @share_pool.shares_by_corporation.delete(corporation)
-          corporation.share_price.corporations.delete(corporation)
-          @corporations.delete(corporation)
-        else
-          @minors.delete(corporation)
-        end
-
-        @cert_limit = init_cert_limit
       end
 
       def init_round
@@ -418,7 +384,7 @@ module Engine
         ], round_num: round_num)
       end
 
-      def tile_cost(tile, entity)
+      def tile_cost(tile, hex, entity)
         [TILE_COST, super].max
       end
 
@@ -601,6 +567,24 @@ module Engine
         end
 
         help
+      end
+
+      def potential_minor_cash(entity, allowed_trains: (0..3))
+        if entity.corporation? && entity.cash.positive? && allowed_trains.include?(entity.trains.size)
+          @minors.reduce(0) do |memo, minor|
+            minor.owned_by_player? && minor.cash.positive? ? memo + minor.cash - 1 : memo
+          end
+        else
+          0
+        end
+      end
+
+      def track_buying_power(entity)
+        buying_power(entity) + potential_minor_cash(entity)
+      end
+
+      def train_buying_power(entity)
+        buying_power(entity) + potential_minor_cash(entity, allowed_trains: (1..2))
       end
     end
   end
