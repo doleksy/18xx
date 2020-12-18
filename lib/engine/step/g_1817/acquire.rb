@@ -12,7 +12,7 @@ module Engine
         include PassableAuction
         include TokenMerger
 
-        attr_reader :auctioning, :last_president
+        attr_reader :auctioning, :last_president, :buyer
 
         def actions(entity)
           return %w[assign pass] if @offer
@@ -24,6 +24,10 @@ module Engine
           actions << 'merge' if @winner&.entity == entity
 
           actions
+        end
+
+        def merge_name
+          'Acquire'
         end
 
         def description
@@ -53,7 +57,7 @@ module Engine
         def active_entities
           # Double check that a cash crisis hasn't just been resolved, as the corp may now be in liquidation.
           if auctioning_corporation && corporation_entered_acquisition_this_round?(auctioning_corporation)
-            @game.log << "#{auctioning_corporation.name} is no longer eligable to be auctioned"
+            @game.log << "#{auctioning_corporation.name} is no longer eligible to be auctioned"
             @round.offering.delete(auctioning_corporation)
             @offer = nil
             setup_auction
@@ -75,7 +79,13 @@ module Engine
                 end
 
               players = @game.players.rotate((@game.players.index(owner) + 1) % @game.players.size)
-              [players.find { |p| @active_bidders.include?(p) }]
+              player = players.find { |p| @active_bidders.include?(p) }
+              if player.bankrupt
+                pass_auction(player)
+                active_entities
+              else
+                [player]
+              end
             end
           elsif @buyer
             [@buyer]
@@ -179,7 +189,6 @@ module Engine
         end
 
         def process_acquire(buyer)
-          @buyer = buyer
           acquired_corp = @winner.corporation
 
           if !buyer || !mergeable(acquired_corp).include?(buyer)
@@ -189,6 +198,8 @@ module Engine
           if buyer.owner != @winner.entity
             @game.game_error("Target corporation must be owned by #{@winner.entity.name}")
           end
+
+          @buyer = buyer
 
           receiving = []
 
@@ -217,7 +228,7 @@ module Engine
 
           remove_duplicate_tokens(buyer, acquired_corp)
           if tokens_above_limits?(buyer, acquired_corp)
-            @game.log << "#{buyer.name} will be above token limit and must decide which tokens to keep"
+            @game.log << "#{buyer.name} will be above token limit and must decide which tokens to remove"
             @round.corporations_removing_tokens = [buyer, acquired_corp]
           else
             tokens = move_tokens_to_surviving(buyer, acquired_corp)
@@ -297,7 +308,7 @@ module Engine
 
               @shareholder_cash = 0
             elsif loan_value.positive?
-              unless president == @game.share_pool
+              if president != @game.share_pool && @buyer
                 @game.log << "#{@buyer.name} settles #{acquired_corp.name} loans for "\
                 "#{@game.format_currency(loan_value)}"
               end
@@ -369,7 +380,7 @@ module Engine
 
         def mergeable(corporation)
           return [] if corporation.player?
-          return [] if @offer
+          return [] if @offer || @buyer
           return mergeable_by_entity(current_entity, corporation, min_bid(corporation)) unless @winner
 
           mergeable_by_entity(@winner.entity, corporation, @winner.price)
@@ -402,7 +413,7 @@ module Engine
           # Notionally pay off all the acquired corps loans, and then they can be taken again
           loan_payoff = acquired_corp.loans.size * @game.loan_value
 
-          @game.buying_power(corporation) +
+          buying_power(corporation) +
           acquired_corp.cash +
           treasury_share_compensation(acquired_corp) -
           loan_payoff

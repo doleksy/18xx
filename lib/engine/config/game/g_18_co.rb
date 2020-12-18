@@ -75,15 +75,27 @@ module Engine
 		"L20": "Fort Worth, TX"
 	},
 	"tiles": {
-		"3": 6,
-		"4": 6,
+		"3a": {
+			"count": 6,
+			"color": "yellow",
+			"code": "town=revenue:10,to_city:1;path=a:0,b:_0;path=a:_0,b:1"
+		},
+		"4a": {
+			"count": 6,
+			"color": "yellow",
+			"code": "town=revenue:10,to_city:1;path=a:0,b:_0;path=a:_0,b:3"
+		},
 		"5": 3,
 		"6": 6,
 		"7": 15,
 		"8": 25,
 		"9": 25,
 		"57": 6,
-		"58": 6,
+		"58a": {
+			"count": 6,
+			"color": "yellow",
+			"code": "town=revenue:10,to_city:1;path=a:0,b:_0;path=a:_0,b:2"
+		},
 		"co1": {
 			"count": 1,
 			"color": "yellow",
@@ -346,6 +358,7 @@ module Engine
 					"owner_type": "corporation",
 					"when": "track",
 					"count": 1,
+					"special": true,
 					"tiles": [
 						"14",
 						"15"
@@ -385,7 +398,12 @@ module Engine
 			"revenue": 10,
 			"desc": "An owning Corporation may return a station token to its charter to gain the token cost. Corporation must always have at least one token on the board. Action closes the company or closes on purchase of “5” train.",
 			"abilities": [
-
+				{
+					"type": "return_token",
+					"owner_type": "corporation",
+					"count": 1,
+					"reimburse": true
+				}
 			]
 		},
 		{
@@ -421,7 +439,17 @@ module Engine
 
 					],
 					"tiles": [
-
+						"co1",
+						"co5",
+						"3a",
+						"4a",
+						"5",
+						"6",
+						"7",
+						"8",
+						"9",
+						"57",
+						"58a"
 					]
 				}
 			]
@@ -650,6 +678,7 @@ module Engine
 			"float_percent": 20,
 			"always_market_price": true,
 			"logo": "18_co/DSNG",
+			"shares":[20, 10, 20, 20, 10, 10, 10],
 			"tokens": [
 				0,
 				40
@@ -849,6 +878,11 @@ module Engine
 					"visit": 99
 				}
 			],
+			"events": [
+				{
+					"type": "presidents_choice"
+				}
+			],
 			"available_on": "6",
 			"price": 850,
 			"num": 2
@@ -870,6 +904,11 @@ module Engine
 					],
 					"pay": 99,
 					"visit": 99
+				}
+			],
+			"events": [
+				{
+					"type": "presidents_choice"
 				}
 			],
 			"available_on": "6",
@@ -1170,10 +1209,7 @@ module Engine
 			"tiles": [
 				"yellow"
 			],
-			"operating_rounds": 2,
-			"status": [
-				"can_buy_companies_from_other_players"
-			]
+			"operating_rounds": 2
 		},
 		{
 			"name": "3",
@@ -1184,8 +1220,7 @@ module Engine
 				"green"
 			],
 			"status": [
-				"can_buy_companies",
-				"can_buy_companies_from_other_players"
+				"can_buy_companies"
 			],
 			"operating_rounds": 2
 		},
@@ -1198,8 +1233,7 @@ module Engine
 				"green"
 			],
 			"status": [
-				"can_buy_companies",
-				"can_buy_companies_from_other_players"
+				"can_buy_companies"
 			],
 			"operating_rounds": 2
 		},
@@ -1255,6 +1289,9 @@ module Engine
 				"yellow",
 				"green",
 				"brown"
+			],
+			"status":[
+				"reduced_tile_lay"
 			],
 			"operating_rounds": 2
 		}

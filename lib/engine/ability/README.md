@@ -22,9 +22,6 @@ These attributes may be set for all ability types
 - `count_per_or`: The number of times the ability may be used in each OR; the
   property `count_this_or` is reset to 0 at the start of each OR and increments
   each time the ability is used
-- `show_count`: If the count used/count started should be shown to the user; this
-  this assumes that the ability can be partially used and also that the entity only has
-  one ability with show_count = true
 
 ## additional_token
 
@@ -64,12 +61,22 @@ company is bought in by a corporation.
 
 - `hexes`: An array of hex coordinates that are blocked
 
+## blocks_partition
+
+Designate a type of partition which this ability disallows crossing.
+A partition separates an hex in 2 halves. Use the `owner_type: "player"`
+to specify that the blocking ends when the company is bought in by a
+corporation.
+
+- `partition_type`: The name of the partition type that is to be
+blocked, akin to terrain and border types.
+
 ## close
 
 Describe when the company closes, using the `when` attribute.
 
 - `corporation'`: If `when` is set to `"train"`, this value is the name
-of the corporation whose train purchase closes this company.
+  of the corporation whose train purchase closes this company.
 
 ## description
 
@@ -104,6 +111,14 @@ Reserve a token slot
 - `slot`: A specific token slot to designate
 - `city`: Which city to reserve, if multiple cities are on one hex
 
+## return_token
+
+Take a station token off the board and place back on the charter
+in the most expensive open location
+
+- `reimburse`: If true, the corporation is reimbursed the token cost
+  of the location where the token is placed
+
 ## revenue_change
 
 The revenue for this company changes when the conditions set by `when`
@@ -111,7 +126,7 @@ and `owner_type` are satisfied.
 
 - `revenue`: The new revenue value
 
-## share
+## shares
 
 This company comes with a share of a corporation when acquired.
 
@@ -122,8 +137,7 @@ This company comes with a share of a corporation when acquired.
   president's certificate randomly selected at game setup. Gives one
   ordinary share of one the corporations listed in `corporations`,
   randomly selected at game setup.
-- `corporations`: A list of corporations to be used with `"share":
-  "random_share"`
+- `corporations`: A list of corporations to be used with `"share": "random_share"`
 
 ## teleport
 
@@ -133,6 +147,8 @@ Lay a tile and place a station token without connectivity
   teleport destination.
 - `tiles`: An array of tile numbers which may be placed at the
   teleport destination.
+- `cost`: Cost to use the teleport ability.
+- `fee_tile_lay`: If true, the tile is laid with 0 cost. Default false.
 
 ## tile_discount
 
@@ -140,6 +156,8 @@ Discount the cost for laying tiles in the specified terrain type
 
 - `discount`: Discount amount
 - `terrain`: Type of terrain for which discount is provided
+- `hexes`: If not specified, all applicable hexes qualifies for
+  the discount. If specified, only specified hexes qualify
 
 ## tile_income
 
@@ -169,6 +187,8 @@ normal tile lay actions.
 - `reachable`: If true, when tile layed, a check is done if one of the
   controlling corporation's station tokens are reachable; if not a game
   error is triggered. Default false.
+- `must_lay_together`: If true, all the tile lays must happen at the same
+  time. Default false.
 
 ## train_buy
 
@@ -194,3 +214,14 @@ Modified station token placement
   token without connectivity, for the given price.
 - `extra`: If true, this ability may be used in addition to the turn's
   normal token placement step. Default false.
+- `cheater`: If an integer is given, this token will be placed into a city at
+  whichever is the lowest unoccupied slot index of the following: a regular slot
+  in the city; the `cheater` value; one slot higher than the city actually has,
+  effectively increasing the city's size by one. (See 18 Los Angeles's optional
+  company "Dewey, Cheatham, and Howe" or the corporations which get removed in
+  1846 2p Variant for examples). Default nil.
+- `special_only`: If true, this ability may only be used by explicitly
+  activating the company to which it belongs (i.e., using the `SpecialTrack`
+  step); if unset or false, `Engine::Step::Tokener#adjust_token_price_ability!`
+  infers that the special ability ought to be used whenever a token is being
+  placed in a location that the ability is allowed to use. Default false.

@@ -1,8 +1,9 @@
 # frozen_string_literal: true
 
-require_relative '../config/game/g_1817'
+require_relative '../config/game/g_1867'
 require_relative '../loan.rb'
 require_relative 'base'
+require_relative 'interest_on_loans'
 
 module Engine
   module Game
@@ -28,146 +29,106 @@ module Engine
                       white: '#fff36b',
                       yellow: '#ffdea8')
 
-      # @todo: Actually import the 1867 config
-      load_from_json(Config::Game::G1817::JSON)
+      load_from_json(Config::Game::G1867::JSON)
 
       GAME_LOCATION = 'Canada'
-      GAME_RULES_URL = 'tbd'
+      GAME_RULES_URL = 'https://boardgamegeek.com/filepage/212807/18611867-rulebook'
       GAME_DESIGNER = 'Ian D. Wilson'
       GAME_PUBLISHER = :grand_trunk_games
       GAME_INFO_URL = 'https://github.com/tobymao/18xx/wiki/1867'
 
-      # @todo: unchanged from here
+      HOME_TOKEN_TIMING = :float
       MUST_BID_INCREMENT_MULTIPLE = true
-      SEED_MONEY = 200
-      MUST_BUY_TRAIN = :never
-      EBUY_PRES_SWAP = false # allow presidential swaps of other corps when ebuying
+      MUST_BUY_TRAIN = :always # mostly true, needs custom code
       POOL_SHARE_DROP = :each
-      SELL_MOVEMENT = :none
+      SELL_MOVEMENT = :left_block_pres
       ALL_COMPANIES_ASSIGNABLE = true
       SELL_AFTER = :operate
       DEV_STAGE = :prealpha
+      SELL_BUY_ORDER = :sell_buy
 
       ASSIGNMENT_TOKENS = {
         'bridge' => '/icons/1817/bridge_token.svg',
         'mine' => '/icons/1817/mine_token.svg',
       }.freeze
 
-      GAME_END_CHECK = { bankrupt: :immediate, custom: :one_more_full_or_set }.freeze
+      GAME_END_CHECK = { bank: :current_or, custom: :one_more_full_or_set }.freeze
+
+      HEX_WITH_O_LABEL = %w[J12].freeze
+      HEX_UPGRADES_FOR_O = %w[201 202 203 207 208 622 623 801 X8].freeze
 
       CERT_LIMIT_CHANGE_ON_BANKRUPTCY = true
 
       # Two lays with one being an upgrade, second tile costs 20
       TILE_LAYS = [{ lay: true, upgrade: true }, { lay: true, upgrade: :not_if_upgraded, cost: 20 }].freeze
 
-      IPO_NAME = 'Treasury'
-
       LIMIT_TOKENS = 8
 
       EVENTS_TEXT = Base::EVENTS_TEXT.merge('signal_end_game' => ['Signal End Game',
                                                                   'Game Ends 3 ORs after purchase/export'\
-                                                                  ' of first 8 train']).freeze
-      STATUS_TEXT = Base::STATUS_TEXT.merge(
-        'no_new_shorts' => ['Cannot gain new shorts', 'Short selling is not permitted, existing shorts remain'],
-      ).freeze
-      MARKET_TEXT = Base::MARKET_TEXT.merge(safe_par: 'Minimum Price for a 2($55), 5($70) and 10($120) share'\
-      ' corporation taking maximum loans to ensure it avoids acquisition',
-                                            acquisition: 'Acquisition (Pay $40 dividend to move right, $80'\
-                                            ' to double jump)').freeze
-      STOCKMARKET_COLORS = Base::STOCKMARKET_COLORS.merge(par: :gray).freeze
-      MARKET_SHARE_LIMIT = 1000 # notionally unlimited shares in market
+                                                                  ' of first 8 train'],
+                                            'green_minors_available' => ['Green Minors become available'],
+                                            'majors_can_ipo' => ['Majors can be ipoed'],
+                                            'minors_cannot_start' => ['Minors cannot start'],
+                                            'minors_nationalized' => ['Minors are nationalized'],
+                                            'trainless_nationalization' =>
+                                            ['Trainless Nationalization',
+                                             'Operating Trainless Minors are nationalized'\
+                                             ', Operating Trainless Majors may nationalize']).freeze
+      MARKET_TEXT = Base::MARKET_TEXT.merge(par_1: 'Minor Corporation Par',
+                                            par_2: 'Major Corporation Par',
+                                            par: 'Major/Minor Corporation Par',
+                                            convert_range: 'Price range to convert minor to major',
+                                            max_price: 'Maximum price for a minor').freeze
+      STOCKMARKET_COLORS = Base::STOCKMARKET_COLORS.merge(par_1: :orange, par_2: :green).freeze
       CORPORATION_SIZES = { 2 => :small, 5 => :medium, 10 => :large }.freeze
+      include InterestOnLoans
 
-      attr_reader :loan_value, :owner_when_liquidated, :stock_prices_start_merger
+      # Minors are done as corporations with a size of 2
 
-      def init_stock_market
-        @owner_when_liquidated = {}
-        super
+      attr_reader :loan_value, :trainless_major
+
+      def ipo_name(_entity = nil)
+        'Treasury'
       end
-
-      def bankruptcy_limit_reached?
-        @players.reject(&:bankrupt).one?
-      end
-
-      # @todo: unchanged to here
 
       def interest_rate
         5 # constant
       end
 
       def interest_owed_for_loans(loans)
-        (interest_rate * loans * @loan_value) / 100
+        interest_rate * loans
       end
 
       def interest_owed(entity)
         interest_owed_for_loans(entity.loans.size)
       end
 
-      # @todo: unchanged from here
-
-      def can_pay_interest?(entity, extra_cash = 0)
-        # Can they cover it using cash?
-        return true if entity.cash + extra_cash > interest_owed(entity)
-
-        # Can they cover it using buying_power minus the full interest
-        (buying_power(entity) + extra_cash) > interest_owed_for_loans(maximum_loans(entity))
-      end
-
       def maximum_loans(entity)
-        entity.total_shares
-      end
-
-      def bidding_power(player)
-        player.cash + player.companies.sum(&:value)
-      end
-
-      def num_certs(entity)
-        # Privates don't count towards limit
-        entity.shares.count { |s| s.corporation.counts_for_limit && s.counts_for_limit }
+        entity.type == :major ? 5 : 2
       end
 
       def home_token_locations(corporation)
-        hexes.select do |hex|
+        open_locations = hexes.select do |hex|
           hex.tile.cities.any? { |city| city.tokenable?(corporation, free: true) }
+        end
+
+        return open_locations if corporation.type == :minor
+
+        # @todo: this may need optimizing when changing connections for loading.
+        unconnected = open_locations.select { |hex| hex.connections.none? }
+        if unconnected.none?
+          open_locations
+        else
+          unconnected
         end
       end
 
       def redeemable_shares(entity)
         return [] unless entity.corporation?
-        return [] unless round.steps.find { |step| step.class == Step::G1817::BuySellParShares }.active?
 
         bundles_for_corporation(share_pool, entity)
           .reject { |bundle| entity.cash < bundle.price }
-      end
-
-      def tokens_needed(corporation)
-        tokens_needed = { 2 => 1, 5 => 2, 10 => 4 }[corporation.total_shares] - corporation.tokens.size
-        tokens_needed += 1 if corporation.companies.any? { |c| c.id == 'TS' }
-        tokens_needed
-      end
-
-      def size_corporation(corporation, size)
-        original_shares = @_shares.values.select { |share| share.corporation == corporation }
-        game_error('Can only convert 2 share corporation') unless corporation.total_shares == 2
-
-        corporation.share_holders.clear
-
-        case size
-        when 5
-          original_shares[0].percent = 40
-          shares = 3.times.map { |i| Share.new(corporation, percent: 20, index: i + 1) }
-        when 10
-          original_shares[0].percent = 20
-          shares = 8.times.map { |i| Share.new(corporation, percent: 10, index: i + 1) }
-        end
-
-        original_shares.each { |share| corporation.share_holders[share.owner] += share.percent }
-
-        corporation.max_ownership_percent = 60 unless size == 2
-
-        shares.each do |share|
-          add_new_share(share)
-        end
       end
 
       def bundles_for_corporation(share_holder, corporation, shares: nil)
@@ -178,209 +139,22 @@ module Engine
         )
       end
 
-      def convert(corporation)
-        shares = @_shares.values.select { |share| share.corporation == corporation }
-
-        corporation.share_holders.clear
-
-        case corporation.total_shares
-        when 2
-          shares[0].percent = 40
-          new_shares = 3.times.map { |i| Share.new(corporation, percent: 20, index: i + 1) }
-        when 5
-          shares.each { |share| share.percent = share.percent.positive? ? 10 : -10 }
-          shares[0].percent = 20
-          new_shares = 5.times.map { |i| Share.new(corporation, percent: 10, index: i + 4) }
-        else
-          game_error('Cannot convert 10 share corporation')
-        end
-
-        corporation.max_ownership_percent = 60
-        shares.each { |share| corporation.share_holders[share.owner] += share.percent }
-
-        new_shares.each do |share|
-          add_new_share(share)
-        end
-        new_shares
-      end
-
-      def shorts(corporation)
-        @_shares.values.select { |share| share.corporation == corporation && share.percent.negative? }
-      end
-
-      def entity_shorts(entity, corporation)
-        entity.shares_of(corporation).select { |share| share.percent.negative? }
-      end
-
-      def close_market_shorts
-        @corporations.each do |corporation|
-          # Try closing shorts
-          count = 0
-          while entity_shorts(@share_pool, corporation).any? &&
-            (market_shares = @share_pool.shares_of(corporation)
-             .select { |share| share.percent.positive? && !share.president }).any?
-
-            unshort(@share_pool, market_shares.first)
-            count += 1
-          end
-          @log << "Market closes #{count} shorts for #{corporation.name}" if count.positive?
-        end
-      end
-
-      def close_bank_shorts
-        # Close out shorts in stock market with the bank buying shares from the treasury
-        @corporations.each do |corporation|
-          count = 0
-          while entity_shorts(@share_pool, corporation).any? &&
-            corporation.shares.any?
-
-            # Market buys the share
-            share = corporation.shares.first
-            @share_pool.buy_shares(@share_pool, share)
-
-            # Then closes the share
-            unshort(@share_pool, share)
-            count += 1
-
-          end
-          @log << "Market closes #{count} shorts for #{corporation.name}" if count.positive?
-        end
-      end
-
-      def migrate_shares(corporation, other)
-        # Migrate shares from a 5 & 5 corporation merger
-        new_shares = convert(corporation)
-        percentage = 10
-
-        shares = @_shares.values.select { |share| share.corporation == other }
-        surviving_shares = @_shares.values.select { |share| share.corporation == corporation }
-        # Highest share (9 is all the potential 'normal' share certificates)
-        highest_share = [surviving_shares.map(&:index).max, 9].max
-
-        shares.each do |share|
-          entity = share.owner
-          entity = corporation if entity == other
-          # convert each 20% in the old company into 10% in the new company
-          (share.percent / 20).abs.times do
-            if share.percent.positive?
-              if new_shares.any?
-                # Use the 'normal' shares where possible until they run out.
-                new_share = new_shares.shift
-                new_share.transfer(entity)
-              else
-                highest_share += 1
-                new_share = Share.new(corporation, owner: entity, percent: percentage, index: highest_share)
-                add_new_share(new_share)
-              end
-            else
-              highest_share += 1
-              short = Share.new(corporation, owner: entity, percent: -percentage, index: highest_share)
-              short.buyable = false
-              short.counts_for_limit = false
-              add_new_share(short)
-            end
-          end
-        end
-
-        max_shares = corporation.player_share_holders.values.max
-
-        # Check cross-short merge problem
-        game_error('At least one player must have more than 20% to allow a merge') if max_shares < 20
-
-        # Find the new president, tie break is the surviving corporation president
-        # This is done before the cancelling to ensure the new president can cancel any shorts
-        majority_share_holders = corporation
-          .player_share_holders
-          .select { |_, p| p == max_shares }
-          .keys
-
-        previous_president = corporation.owner
-
-        if majority_share_holders.none? { |player| player == previous_president }
-          president = majority_share_holders
-            .select { |p| p.percent_of(corporation) >= corporation.presidents_percent }
-            .min_by { |p| @share_pool.distance(previous_president, p) }
-
-          president_share = previous_president.shares_of(corporation).find(&:president)
-          corporation.owner = president
-          @log << "#{president.name} becomes the president of #{corporation.name}"
-          @share_pool.change_president(president_share, previous_president, president)
-        end
-
-        # Consolidate shorts with their share pair (including share pool shares)
-        @_shares
-          .values
-          .select { |share| share.corporation == corporation }
-          .group_by(&:owner)
-          .each do |owner, _shares_|
-          shares = owner.shares_of(corporation)
-          while shares.any? { |s| s.percent.negative? } && shares.any? { |s| s.percent == percentage }
-            share = shares.find { |s| s.percent == percentage }
-            unshort(owner, share)
-          end
-        end
-      end
-
-      def add_new_share(share)
-        owner = share.owner
-        corporation = share.corporation
-        corporation.share_holders[owner] += share.percent if owner
-        owner.shares_by_corporation[corporation] << share
-        @_shares[share.id] = share
-      end
-
-      def remove_share(share)
-        owner = share.owner
-        corporation = share.corporation
-        corporation.share_holders[owner] -= share.percent if owner
-        owner.shares_by_corporation[corporation].delete(share)
-        @_shares.delete(share.id)
-      end
-
-      def short(entity, corporation)
-        price = corporation.share_price.price
-        percent = corporation.share_percent
-
-        shares = @_shares.values.select { |share| share.corporation == corporation }
-
-        # Highest share (9 is all the potential 'normal' share certificates)
-        highest_share = [shares.map(&:index).max, 9].max
-
-        share = Share.new(corporation, owner: @share_pool, percent: percent, index: highest_share + 1)
-        short = Share.new(corporation, owner: entity, percent: -percent, index: highest_share + 2)
-        short.buyable = false
-        short.counts_for_limit = false
-
-        @log << "#{entity.name} shorts a #{percent}% " \
-          "share of #{corporation.name} for #{format_currency(price)}"
-
-        @bank.spend(price, entity)
-        add_new_share(short)
-        add_new_share(share)
-      end
-
-      def unshort(entity, share)
-        # Share is the positive share bought to cancel the short.
-        # The share should be owned by the entity
-
-        shares = entity.shares_of(share.corporation)
-        remove_share(share)
-
-        short = shares.find { |s| s.percent == -share.percent }
-        remove_share(short)
-      end
-
       def take_loan(entity, loan)
         game_error("Cannot take more than #{maximum_loans(entity)} loans") unless can_take_loan?(entity)
-        price = entity.share_price.price
         name = entity.name
-        name += " (#{entity.owner.name})" if @round.is_a?(Round::Stock)
-        @log << "#{name} takes a loan and receives #{format_currency(loan.amount)}"
-        @bank.spend(loan.amount, entity)
-        @stock_market.move_left(entity)
-        log_share_price(entity, price)
+        amount = loan.amount - 5
+        @log << "#{name} takes a loan and receives #{format_currency(amount)}"
+        @bank.spend(amount, entity)
         entity.loans << loan
         @loans.delete(loan)
+      end
+
+      def repay_loan(entity, loan)
+        @log << "#{entity.name} pays off a loan for #{format_currency(amount)}"
+        entity.spend(amount, bank)
+
+        entity.loans.delete(loan)
+        @game.loans << loan
       end
 
       def can_take_loan?(entity)
@@ -389,41 +163,76 @@ module Engine
           @loans.any?
       end
 
-      def float_str(_entity)
-        '2 shares to start'
-      end
-
-      def buying_power(entity)
+      def buying_power(entity, full = false)
+        return entity.cash unless full
         return entity.cash unless entity.corporation?
 
-        entity.cash + ((maximum_loans(entity) - entity.loans.size) * @loan_value)
+        # Loans are actually generate $5 less than when taken out.
+        entity.cash + ((maximum_loans(entity) - entity.loans.size) * @loan_value - 5)
       end
 
-      def liquidate!(corporation)
-        @owner_when_liquidated[corporation] = corporation.owner
-        @stock_market.move(corporation, 0, 0, force: true)
-      end
+      def nationalize!(corporation)
+        @log << "#{corporation.name} is nationalized"
 
-      def find_share_price(price)
-        @stock_market
-          .market[0]
-          .reverse
-          .find { |sp| sp.price <= price }
+        repay_loan(corporation, corporation.loan.first) while corporation.cash > @loan_value && corporation.loans.any?
+
+        # Move once automatically
+        price = corporation.share_price.price
+        stock_market.move_left(corporation)
+
+        corporation.loans.each do
+          stock_market.move_left(corporation)
+          stock_market.move_left(corporation)
+        end
+        log_share_price(corporation, price)
+
+        # Payout players for shares
+        per_share = corporation.share_price.price
+        total_payout = corporation.total_shares * per_share
+        payouts = {}
+        @players.each do |player|
+          amount = player.num_shares_of(corporation) * per_share
+          next if amount.zero?
+
+          payouts[player] = amount
+          @bank.spend(amount, player)
+        end
+
+        if payouts.any?
+          receivers = payouts
+                        .sort_by { |_r, c| -c }
+                        .map { |receiver, cash| "#{format_currency(cash)} to #{receiver.name}" }.join(', ')
+
+          @log << "#{corporation.name} settles with shareholders #{format_currency(total_payout)} = "\
+                          "#{format_currency(per_share)} (#{receivers})"
+        end
+
+        # Close corp (minors close, majors reset)
+        if corporation.type == :minor
+          close_corporation(corporation)
+        else
+          reset_corporation(corporation)
+        end
       end
 
       def revenue_for(route, stops)
         revenue = super
 
-        revenue += 10 * stops.count { |stop| stop.hex.assigned?('bridge') }
-
         game_error('Route visits same hex twice') if route.hexes.size != route.hexes.uniq.size
 
-        mine = 'mine'
-        if route.hexes.first.assigned?(mine) || route.hexes.last.assigned?(mine)
-          game_error('Route cannot start or end with a mine')
+        route.corporation.companies.each do |company|
+          company.abilities(:hex_bonus) do |ability|
+            revenue += stops.map { |s| s.hex.id }.uniq.sum { |id| ability.hexes.include?(id) ? ability.amount : 0 }
+          end
         end
 
-        revenue += 10 * route.all_hexes.count { |hex| hex.assigned?(mine) }
+        # Quebec, Montreal and Toronto
+        capitals = stops.find { |stop| %w[F16 L12 O7].include?(stop.hex.name) }
+        # Timmins
+        timmins = stops.find { |stop| stop.hex.name == 'D2' }
+
+        revenue += 40 if capitals && timmins
+
         revenue
       end
 
@@ -446,13 +255,53 @@ module Engine
         CORPORATION_SIZES[entity.total_shares]
       end
 
-      def show_corporation_size?(_entity)
-        true
+      def upgrades_to?(from, to, special = false)
+        # O labelled tile upgrades to Ys until Grey
+        return super unless HEX_WITH_O_LABEL.include?(from.hex.name)
+
+        return false unless HEX_UPGRADES_FOR_O.include?(to.name)
+
+        super(from, to, true)
+      end
+
+      def compute_stops(route)
+        # 1867 should always have two distances, one with a pay of zero, the other with the full distance.
+        visits = route.visited_stops
+        distance = route.train.distance
+        return [] if visits.empty?
+
+        mandatory_distance = distance.find { |d| d['pay'].positive? }
+
+        # Find all the mandatory stops
+        mandatory_stops, optional_stops = visits.partition { |node| mandatory_distance['nodes'].include?(node.type) }
+
+        # Only both with the extra step if it's not all mandatory
+        return mandatory_stops if mandatory_stops.size == mandatory_distance['pay']
+
+        need_token = mandatory_stops.none? { |stop| stop.tokened_by?(route.corporation) }
+
+        remaining_stops = mandatory_distance['pay'] - mandatory_stops.size
+
+        # Allocate optional stops
+        stops, revenue = optional_stops.combination(remaining_stops.to_i).map do |stops|
+          # Make sure this set of stops is legal
+          # 1) At least one stop must have a token (for 5+5E train)
+          next if need_token && stops.none? { |stop| stop.tokened_by?(route.corporation) }
+
+          all_stops = mandatory_stops + stops
+          [all_stops, revenue_for(route, all_stops)]
+        end.compact.max_by(&:last)
+
+        revenue ||= 0
+
+        return stops if revenue.positive?
+      end
+
+      def post_train_buy
+        postevent_trainless_nationalization! if @trainless_nationalization
       end
 
       private
-
-      # @todo: unchanged to here
 
       def new_auction_round
         Round::Auction.new(self, [
@@ -460,51 +309,43 @@ module Engine
         ])
       end
 
-      # @todo: unchanged from here
-
       def stock_round
-        close_bank_shorts
-        @interest_fixed = nil
-
-        Round::G1817::Stock.new(self, [
+        Round::G1867::Stock.new(self, [
+          Step::G1867::MajorTrainless,
           Step::DiscardTrain,
           Step::HomeToken,
-          Step::G1817::BuySellParShares,
+          Step::G1867::BuySellParShares,
         ])
       end
 
       def operating_round(round_num)
-        @interest_fixed = nil
-        @interest_fixed = interest_rate
-        # Revaluate if private companies are owned by corps with trains
-        @companies.each do |company|
-          next unless company.owner
-
-          company.abilities(:revenue_change, 'has_train') do |ability|
-            company.revenue = company.owner.trains.any? ? ability.revenue : 0
-          end
-        end
-
-        Round::G1817::Operating.new(self, [
-          Step::G1817::Bankrupt,
-          Step::G1817::CashCrisis,
-          Step::G1817::Loan,
-          Step::G1817::SpecialTrack,
-          Step::G1817::Assign,
+        Round::G1867::Operating.new(self, [
+          Step::G1867::MajorTrainless,
           Step::DiscardTrain,
-          Step::G1817::Track,
-          Step::Token,
+          Step::BuyCompany,
+          Step::G1867::RedeemShares,
+          Step::G1867::Track,
+          Step::G1867::Token,
           Step::Route,
-          Step::G1817::Dividend,
-          Step::G1817::BuyTrain,
+          Step::G1867::Dividend,
+          Step::G1867::LoanOperations,
+          Step::G1867::BuyTrain,
+          [Step::BuyCompany, blocks: true],
         ], round_num: round_num)
       end
 
       def or_round_finished
-        if @depot.upcoming.first.name == '2'
-          depot.export_all!('2')
+        current_phase = phase.name.to_i
+        depot.export! if current_phase >= 4 && current_phase <= 7
+      end
+
+      def new_or!
+        if @round.round_num < @operating_rounds
+          new_operating_round(@round.round_num + 1)
         else
-          depot.export!
+          @turn += 1
+          or_set_finished
+          new_stock_round
         end
       end
 
@@ -517,51 +358,34 @@ module Engine
             new_operating_round
           when Round::Operating
             or_round_finished
-            # Store the share price of each corp to determine if they can be acted upon in the AR
-            @stock_prices_start_merger = @corporations.map { |corp| [corp, corp.share_price] }.to_h
-            @log << "-- #{round_description('Merger and Conversion', @round.round_num)} --"
-            Round::G1817::Merger.new(self, [
-              Step::G1817::ReduceTokens,
-              Step::DiscardTrain,
-              Step::G1817::PostConversion,
-              Step::G1817::PostConversionLoans,
-              Step::G1817::Conversion,
-            ], round_num: @round.round_num)
-          when Round::G1817::Merger
-            @log << "-- #{round_description('Acquisition', @round.round_num)} --"
-            Round::G1817::Acquisition.new(self, [
-              Step::G1817::ReduceTokens,
-              Step::G1817::Bankrupt,
-              Step::G1817::CashCrisis,
-              Step::DiscardTrain,
-              Step::G1817::Acquire,
-            ], round_num: @round.round_num)
-          when Round::G1817::Acquisition
-            if @round.round_num < @operating_rounds
-              new_operating_round(@round.round_num + 1)
+            if phase.name.to_i <= 3
+              new_or!
             else
-              @turn += 1
-              or_set_finished
-              new_stock_round
+              @log << "-- #{round_description('Merger', @round.round_num)} --"
+              Round::G1867::Merger.new(self, [
+                # Step::G1817::ReduceTokens, #@todo
+                Step::G1867::MajorTrainless,
+                Step::DiscardTrain,
+                Step::G1867::PostMergerShares,
+                Step::G1867::Merge,
+              ], round_num: @round.round_num)
             end
+          when Round::G1867::Merger
+            new_or!
           when init_round.class
             reorder_players
             new_stock_round
           end
       end
 
-      # @todo: unchanged to here
-
       def init_loans
         @loan_value = 50
-        # @todo: this is wrong, but can be calculated
-        70.times.map { |id| Loan.new(id, @loan_value) }
+        # 16 minors * 2, 8 majors * 5
+        72.times.map { |id| Loan.new(id, @loan_value) }
       end
 
-      # @todo: unchanged from here
-
       def round_end
-        Round::G1817::Acquisition
+        Round::G1867::Merger
       end
 
       def custom_end_game_reached?
@@ -572,12 +396,104 @@ module Engine
         @final_operating_rounds || super
       end
 
+      def setup
+        # Hide the special 3 company
+        @hidden_company = company_by_id('3')
+        @companies.delete(@hidden_company)
+
+        # CN corporation only exists to hold tokens
+        @cn_corporation = corporation_by_id('CN')
+        @corporations.delete(@cn_corporation)
+
+        @green_tokens = []
+        @hexes.each do |hex|
+          case hex.id
+          when 'D2'
+            token = Token.new(@cn_corporation, price: 0, logo: '/logos/1867/neutral.svg', type: :neutral)
+            @cn_corporation.tokens << token
+            hex.tile.cities.first.exchange_token(token)
+            @green_tokens << token
+          when 'L12'
+            token = Token.new(@cn_corporation, price: 0, logo: '/logos/1867/neutral.svg', type: :neutral)
+            @cn_corporation.tokens << token
+            hex.tile.cities.last.exchange_token(token)
+            @green_tokens << token
+          when 'F16'
+            hex.tile.cities.first.exchange_token(@cn_corporation.tokens.first)
+          end
+        end
+
+        # Set minors maximum share price
+        max_price = @stock_market.market.first.find { |stockprice| stockprice.types.include?(:max_price) }
+        @corporations.select { |c| c.type == :minor }.each { |c| c.max_share_price = max_price }
+
+        # Move green and majors out of the normal list
+        green = COLORS[:green]
+        @corporations, @future_corporations = @corporations.partition do |corporation|
+          corporation.type == :minor && corporation.color != green
+        end
+      end
+
+      def event_green_minors_available!
+        @log << 'Green minors are now available'
+
+        # Can now lay on the 3
+        @hidden_company.close!
+        # Remove the green tokens
+        @green_tokens.map(&:remove!)
+
+        # All the corporations become available, as minors can now merge/convert to corporations
+        @corporations += @future_corporations
+        @future_corporations = []
+      end
+
+      def event_majors_can_ipo!
+        @log << 'Majors can now be started via IPO'
+        # Done elsewhere
+      end
+
+      def event_minors_cannot_start!
+        @corporations, removed = @corporations.partition do |corporation|
+          corporation.owned_by_player? || corporation.type != :minor
+        end
+        @log << 'Minors can no longer be started' if removed.any?
+      end
+
+      def event_minors_nationalized!
+        # Given minors have a train limit of 1, this shouldn't cause the order to be disrupted.
+        @corporations, removed = @corporations.partition do |corporation|
+          corporation.type != :minor
+        end
+        @log << 'Minors nationalized' if removed.any?
+        removed.each { |c| nationalize!(c) }
+      end
+
       def event_signal_end_game!
-        # If we're in round 1, we have another set of ORs with 2 ORs
-        # If we're in round 2, we have another set of ORs with 3 ORs
-        @final_operating_rounds = @round.round_num == 2 ? 3 : 2
+        # There's always 3 ORs after the 8 train is bought
+        @final_operating_rounds = 3
 
         @log << "First 8 train bought/exported, ending game at the end of #{@turn + 1}.#{@final_operating_rounds}"
+      end
+
+      def event_trainless_nationalization!
+        # Store flag, has to be done after the trains are rusted
+        @trainless_nationalization = true
+      end
+
+      def postevent_trainless_nationalization!
+        trainless = @corporations.select { |c| c.operated? && c.trains.none? }
+
+        @trainless_major = []
+        trainless.each do |c|
+          if c.type == :major
+            @trainless_major << c
+          else
+            nationalize!(c)
+          end
+        end
+
+        @trainless_major = @trainless_major.sort.reverse
+        @trainless_nationalization = false
       end
     end
   end

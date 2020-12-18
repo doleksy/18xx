@@ -8,6 +8,8 @@ require_relative 'company_price_50_to_150_percent'
 module Engine
   module Game
     class G18CO < Base
+      attr_accessor :presidents_choice
+
       register_colors(green: '#237333',
                       red: '#d81e3e',
                       blue: '#0189d1',
@@ -30,18 +32,34 @@ module Engine
       GAME_INFO_URL = 'https://github.com/tobymao/18xx/wiki/18CO:-Rock-&-Stock'
 
       SELL_BUY_ORDER = :sell_buy
+      EBUY_DEPOT_TRAIN_MUST_BE_CHEAPEST = true
       MUST_EMERGENCY_ISSUE_BEFORE_EBUY = true
+      MUST_BID_INCREMENT_MULTIPLE = true
+      ONLY_HIGHEST_BID_COMMITTED = false
+
+      CORPORATE_BUY_SHARE_SINGLE_CORP_ONLY = true
+      CORPORATE_BUY_SHARE_ALLOW_BUY_FROM_PRESIDENT = true
+      DISCARDED_TRAIN_DISCOUNT = 50
 
       # Two tiles can be laid, only one upgrade
-      # TODO: This changes in phase E to a single tile lay
       TILE_LAYS = [{ lay: true, upgrade: true }, { lay: true, upgrade: false }].freeze
-
-      IPO_NAME = 'Treasury'
+      REDUCED_TILE_LAYS = [{ lay: true, upgrade: true }].freeze
 
       # First 3 are Denver, Second 3 are CO Springs
       TILES_FIXED_ROTATION = %w[co1 co2 co3 co5 co6 co7].freeze
       GREEN_TOWN_TILES = %w[co8 co9 co10].freeze
+      GREEN_CITY_TILES = %w[14 15].freeze
       BROWN_CITY_TILES = %w[co4 63].freeze
+
+      STOCKMARKET_COLORS = {
+        par: :yellow,
+        acquisition: :red,
+      }.freeze
+
+      MARKET_TEXT = {
+        par: 'Par: C [40, 50, 60, 75] - 40%, B/C [80, 90, 100, 110] - 50%, A/B/C: [120, 135, 145, 160] - 60%',
+        acquisition: 'Acquisition: Corporation assets will be auctioned if entering Stock Round',
+      }.freeze
 
       PAR_FLOAT_GROUPS = {
         20 => %w[X],
@@ -69,13 +87,29 @@ module Engine
       BASE_MINE_VALUE = 10
 
       EVENTS_TEXT = Base::EVENTS_TEXT.merge(
-          'remove_mines' => ['Mines Close', 'Mine tokens removed from board and corporations']
+          'remove_mines' => ['Mines Close', 'Mine tokens removed from board and corporations'],
+          'presidents_choice' => [
+            'President\'s Choice Triggered',
+            'President\'s choice round will occur at the beginning of the next Stock Round',
+          ]
         ).freeze
+
+      STATUS_TEXT = Base::STATUS_TEXT.merge(
+        'reduced_tile_lay' => ['Reduced Tile Lay', 'Corporations place only one tile per OR.']
+      ).freeze
 
       include CompanyPrice50To150Percent
 
+      def ipo_name(_entity = nil)
+        'Treasury'
+      end
+
       def dsng
         @dsng ||= corporation_by_id('DSNG')
+      end
+
+      def drgr
+        @drgr ||= company_by_id('DRGR')
       end
 
       def imc
@@ -85,6 +119,7 @@ module Engine
       def setup
         setup_company_price_50_to_150_percent
         setup_corporations
+        @presidents_choice = nil
       end
 
       def setup_corporations
@@ -124,8 +159,12 @@ module Engine
         end
       end
 
+      def mines_add(entity, count)
+        mine_create(entity, mines_count(entity) + count)
+      end
+
       def mine_add(entity)
-        mine_create(entity, mines_count(entity) + 1)
+        mines_add(entity, 1)
       end
 
       def mine_update_text(entity)
@@ -133,6 +172,8 @@ module Engine
       end
 
       def mine_create(entity, count)
+        return unless count.positive?
+
         mines_remove(entity)
         total = count * mine_value(entity)
         entity.add_ability(Engine::Ability::Base.new(
@@ -148,15 +189,20 @@ module Engine
       def operating_round(round_num)
         Round::Operating.new(self, [
         Step::Bankrupt,
+        Step::G18CO::Takeover,
         Step::DiscardTrain,
         Step::HomeToken,
+        Step::G18CO::ReturnToken,
         Step::BuyCompany,
         Step::G18CO::RedeemShares,
+        Step::CorporateBuyShares,
+        Step::G18CO::SpecialTrack,
         Step::G18CO::Track,
         Step::Token,
         Step::Route,
         Step::G18CO::Dividend,
-        Step::BuyTrain,
+        Step::G18CO::BuyTrain,
+        Step::CorporateSellShares,
         Step::G18CO::IssueShares,
         [Step::BuyCompany, blocks: true],
         ], round_num: round_num)
@@ -164,16 +210,54 @@ module Engine
 
       def stock_round
         Round::Stock.new(self, [
+        Step::G18CO::Takeover,
         Step::DiscardTrain,
         Step::G18CO::BuySellParShares,
+        ])
+      end
+
+      def new_presidents_choice_round
+        @log << '-- President\'s Choice --'
+        Round::G18CO::PresidentsChoice.new(self, [
+          Step::G18CO::PresidentsChoice,
         ])
       end
 
       def new_auction_round
         Round::Auction.new(self, [
           Step::G18CO::CompanyPendingPar,
-          Step::WaterfallAuction,
+          Step::G18CO::MovingBidAuction,
         ])
+      end
+
+      def next_round!
+        @round =
+          case @round
+          when Round::G18CO::PresidentsChoice
+            new_stock_round
+          when Round::Stock
+            @operating_rounds = @phase.operating_rounds
+            reorder_players
+            new_operating_round
+          when Round::Operating
+            if @round.round_num < @operating_rounds
+              or_round_finished
+              new_operating_round(@round.round_num + 1)
+            else
+              @turn += 1
+              or_round_finished
+              or_set_finished
+              if @presidents_choice == :triggered
+                new_presidents_choice_round
+              else
+                new_stock_round
+              end
+            end
+          when init_round.class
+            init_round_finished
+            reorder_players
+            new_stock_round
+          end
       end
 
       def action_processed(action)
@@ -183,6 +267,23 @@ module Engine
         when Action::BuyCompany
           mine_update_text(action.entity) if action.company == imc && action.entity.corporation?
         end
+      end
+
+      def check_distance(route, visits)
+        super
+
+        distance = route.train.distance
+
+        return if distance.is_a?(Numeric)
+
+        cities_allowed = distance.find { |d| d['nodes'].include?('city') }['pay']
+        cities_visited = visits.count { |v| v.city? || v.offboard? }
+        start_at_town = visits.first.town? ? 1 : 0
+        end_at_town = visits.last.town? ? 1 : 0
+
+        return unless cities_allowed < (cities_visited + start_at_town + end_at_town)
+
+        game_error('Towns on route ends are counted against city limit.')
       end
 
       def revenue_for(route, stops)
@@ -217,6 +318,8 @@ module Engine
       end
 
       def upgrades_to?(from, to, special = false)
+        return true if special && from.hex.tile.color == :yellow && GREEN_CITY_TILES.include?(to.name)
+
         # Green towns can't be upgraded to brown cities unless the hex has the upgrade icon
         if GREEN_TOWN_TILES.include?(from.hex.tile.name)
           return BROWN_CITY_TILES.include?(to.name) if from.hex.tile.icons.any? { |icon| icon.name == 'upgrade' }
@@ -252,6 +355,21 @@ module Engine
         @corporations.each do |corporation|
           mines_remove(corporation)
         end
+      end
+
+      def tile_lays(_entity)
+        return REDUCED_TILE_LAYS if @phase.status.include?('reduced_tile_lay')
+
+        super
+      end
+
+      def event_presidents_choice!
+        return if @presidents_choice
+
+        @log << '-- Event: President\'s Choice --'
+        @log << 'President\'s choice round will occur at the beginning of the next Stock Round'
+
+        @presidents_choice = :triggered
       end
 
       def sell_shares_and_change_price(bundle)
@@ -298,6 +416,14 @@ module Engine
         end
       end
 
+      def emergency_issuable_cash(corporation)
+        emergency_issuable_bundles(corporation).max_by(&:num_shares)&.price || 0
+      end
+
+      def emergency_issuable_bundles(entity)
+        issuable_shares(entity)
+      end
+
       def issuable_shares(entity)
         return [] unless entity.corporation?
         return [] unless entity.num_ipo_shares
@@ -311,6 +437,14 @@ module Engine
 
         bundles_for_corporation(share_pool, entity)
           .reject { |bundle| entity.cash < bundle.price }
+      end
+
+      def purchasable_companies(entity = nil)
+        @companies.select do |company|
+          (company.owner&.player? || company.owner.nil?) &&
+            (entity.nil? || entity != company.owner) &&
+            !company.abilities(:no_buy)
+        end
       end
     end
   end

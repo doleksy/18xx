@@ -183,7 +183,7 @@ module Engine
       "name" : "Ohio Bridge Company",
       "value" : 40,
       "revenue" : 0,
-      "desc" : "Comes with one $10 bridge token that may be placed by the owning corp in Louisville, Cincinnati, or Charleston, max one token per city, regardless of connectivity..  Allows owning corp to skip $10 river fee when placing yellow tiles.",
+      "desc" : "Comes with one $10 bridge token that may be placed by the owning corp in Louisville, Cincinnati, or Charleston, max one token per city, regardless of connectivity.  Allows owning corp to skip $10 river fee when placing yellow tiles.",
       "sym" : "OBC",
       "abilities": [
         {
@@ -199,8 +199,9 @@ module Engine
             "G6",
             "H9"
           ],
-          "owner_type": "corporation",
-          "show_count": true
+          "count": 1,
+          "when": "owning_corp_or_turn",
+          "owner_type": "corporation"
         }
       ]
     },
@@ -225,7 +226,7 @@ module Engine
             "H9"
           ],
           "count": 2,
-          "show_count": true,
+          "when": "owning_corp_or_turn",
           "owner_type": "corporation"
         }
       ]
@@ -273,8 +274,7 @@ module Engine
           "free": false,
           "when": "track",
           "owner_type": "corporation",
-          "count": 1,
-          "show_count": true
+          "count": 1
         }
       ]
     },
@@ -307,8 +307,7 @@ module Engine
           "free": false,
           "when": "track",
           "owner_type": "corporation",
-          "count": 2,
-          "show_count": true
+          "count": 2
         }
       ]
     },
@@ -341,8 +340,7 @@ module Engine
           "free": false,
           "when": "track",
           "owner_type": "corporation",
-          "count": 3,
-          "show_count": true
+          "count": 3
         }
       ]
     },
@@ -666,7 +664,7 @@ module Engine
       "distance": 2,
       "price": 100,
       "rusts_on": "4",
-      "num": 20
+      "num": 40
     },
     {
       "name": "2+",
@@ -711,7 +709,7 @@ module Engine
       "name": "8",
       "distance": 8,
       "price": 1100,
-      "num": 16,
+      "num": 40,
       "events": [
         {"type": "signal_end_game"}
       ]

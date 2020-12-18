@@ -6,12 +6,14 @@ require 'lib/storage'
 require 'view/link'
 require 'view/game/bank'
 require 'view/game/stock_market'
+require 'view/game/actionable'
 
 module View
   module Game
     class Spreadsheet < Snabberb::Component
       include Lib::Color
       include Lib::Settings
+      include Actionable
 
       needs :game
 
@@ -48,6 +50,10 @@ module View
             render_player_companies,
             render_player_certs,
           ]),
+          h(:thead, [
+            h(:tr, { style: { height: '1rem' } }, ''),
+          ]),
+          *render_player_history,
         ])
         # TODO: consider adding OR information (could do both corporation OR revenue and player change in value)
         # TODO: consider adding train availability
@@ -59,6 +65,25 @@ module View
 
       def render_history_titles(corporations)
         or_history(corporations).map { |turn, round| h(:th, @game.or_description_short(turn, round)) }
+      end
+
+      def render_player_history
+        # OR history should exist in all
+        zebra_row = true
+        last_values = nil
+        @game.players.first.history.map do |h|
+          values = @game.players.map do |p|
+            p.history.find { |h2| h2.round == h.round }.value
+          end
+          next if values == last_values
+
+          last_values = values
+          zebra_row = !zebra_row
+          h(:tr, zebra_props(zebra_row), [
+            h('th.left', h.round),
+            *values.map { |v| h('td.padded_number', @game.format_currency(v)) },
+          ])
+        end.compact.reverse
       end
 
       def render_history(corporation)
@@ -84,7 +109,15 @@ module View
                   padding: '0 0.15rem',
                 },
               }
-              h(:td, props, hist[x].revenue.abs)
+
+              if hist[x]&.dividend&.id&.positive?
+                link_h = history_link(hist[x].revenue.abs.to_s,
+                                      "Go to run #{x} of #{corporation.name}",
+                                      hist[x].dividend.id - 1)
+                h(:td, props, [link_h])
+              else
+                h(:td, props, hist[x].revenue.abs.to_s)
+              end
             else
               h(:td, '')
             end
@@ -129,9 +162,9 @@ module View
             *@game.players.map do |p|
               h('th.name.nowrap.right', p == @game.priority_deal_player ? pd_props : '', render_sort_link(p.name, p.id))
             end,
-            h(:th, @game.class::IPO_NAME),
+            h(:th, @game.ipo_name),
             h(:th, 'Market'),
-            h(:th, render_sort_link(@game.class::IPO_NAME, :par_price)),
+            h(:th, render_sort_link(@game.ipo_name, :par_price)),
             h(:th, render_sort_link('Market', :share_price)),
             h(:th, render_sort_link('Cash', :cash)),
             h(:th, render_sort_link('Order', :order)),
@@ -296,7 +329,7 @@ module View
       def render_player_value
         h(:tr, zebra_props(true), [
           h('th.left', 'Value'),
-          *@game.players.map { |p| h('td.padded_number', @game.format_currency(p.value)) },
+          *@game.players.map { |p| h('td.padded_number', @game.format_currency(@game.player_value(p))) },
         ])
       end
 

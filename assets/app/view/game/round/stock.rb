@@ -27,6 +27,9 @@ module View
           @auctioning_corporation = @step.auctioning_corporation if @step.respond_to?(:auctioning_corporation)
           @selected_corporation ||= @auctioning_corporation
 
+          @price_protection = @step.price_protection if @step.respond_to?(:price_protection)
+          @selected_corporation ||= @price_protection&.corporation
+
           @current_entity = @step.current_entity
           if @last_player != @current_entity && !@auctioning_corporation
             store(:selected_corporation, nil, skip: true)
@@ -40,6 +43,13 @@ module View
                         else
                           h('div.margined', 'Must sell stock: above 60% limit in corporation(s)')
                         end
+          end
+
+          if @price_protection
+            num_presentation = @game.share_pool.num_presentation(@price_protection)
+            children << h('div.margined',
+                          "You can price protect #{num_presentation} #{@price_protection.corporation.name} "\
+                          "for #{@game.format_currency(@price_protection.price)}")
           end
 
           children.concat(render_corporations)
@@ -62,6 +72,7 @@ module View
 
           @game.sorted_corporations.reject(&:closed?).map do |corporation|
             next if @auctioning_corporation && @auctioning_corporation != corporation
+            next if @price_protection && @price_protection.corporation != corporation
 
             children = []
             children.concat(render_subsidiaries)
@@ -87,9 +98,17 @@ module View
         end
 
         def render_pre_ipo
-          return h(Par, corporation: @selected_corporation) if @current_actions.include?('par')
-          return h(Bid, entity: @current_entity, corporation: @selected_corporation) if @current_actions.include?('bid')
-
+          type = @step.ipo_type(@selected_corporation)
+          case type
+          when :par
+            return h(Par, corporation: @selected_corporation) if @current_actions.include?('par')
+          when :bid
+            if @current_actions.include?('bid')
+              return h(Bid, entity: @current_entity, corporation: @selected_corporation)
+            end
+          when String
+            return h(:div, type)
+          end
           nil
         end
 

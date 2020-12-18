@@ -124,7 +124,7 @@ module Engine
             corporation.operated? &&
             entity.num_shares_of(corporation) <= 0 &&
             !(corporation.share_price.acquisition? || corporation.share_price.liquidation?) &&
-            !@players_sold[entity].values.include?(:short) &&
+            !@round.players_sold[entity].values.include?(:short) &&
             @game.phase.name != '8'
         end
 
@@ -182,7 +182,7 @@ module Engine
           corporation = action.corporation
           @game.game_error("Cannot short #{corporation.name}") unless can_short?(entity, corporation)
 
-          @players_sold[entity][corporation] = :short
+          @round.players_sold[entity][corporation] = :short
           @game.short(entity, corporation)
 
           @round.last_to_act = entity
@@ -287,13 +287,14 @@ module Engine
           # Pay the player for the company
           corporation.spend(company.value, entity)
 
+          @log << "#{company.name} used for forming #{corporation.name} "\
+            "contributing #{@game.format_currency(company.value)} value"
+
           company.abilities(:additional_token) do |ability|
             corporation.tokens << Engine::Token.new(corporation)
             ability.use!
           end
 
-          @log << "#{company.name} used for forming #{corporation.name} "\
-            "contributing #{@game.format_currency(company.value)} value"
           par_corporation if available_subsidiaries(entity).empty?
         end
 
@@ -385,12 +386,22 @@ module Engine
           highest_bid(corporation).price + min_increment
         end
 
-        def max_bid(player, _corporation = nil)
-          [MAX_BID, @game.bidding_power(player)].min
+        def max_bid(entity, _corporation = nil)
+          return 0 if @game.num_certs(entity) >= @game.cert_limit
+
+          [MAX_BID, @game.bidding_power(entity)].min
+        end
+
+        def ipo_via_par?(_entity)
+          false
         end
 
         def can_ipo_any?(_entity)
           false
+        end
+
+        def ipo_type(_entity)
+          :bid
         end
 
         def setup

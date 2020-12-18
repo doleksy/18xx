@@ -41,7 +41,7 @@ module View
               moves = Array(option[:share_times]).zip(Array(option[:share_direction]))
 
               moves.map do |times, dir|
-                new_share = @game.stock_market.find_relative_share_price(new_share, dir)
+                times.times { new_share = @game.stock_market.find_relative_share_price(new_share, dir) }
 
                 "#{times} #{dir}"
               end.join(', ')
@@ -70,29 +70,61 @@ module View
           ])
         end
 
-        table_props = {
-          style: {
-            margin: '0.5rem 0 0 0',
-            textAlign: 'left',
-          },
+        div_props = {
           key: 'dividend',
           hook: {
             destroy: -> { cleanup },
           },
         }
+
+        table_props = {
+          style: {
+            margin: '0.5rem 0 0 0',
+            textAlign: 'left',
+          },
+        }
         share_props = { style: { width: '2.7rem' } }
 
-        h(:table, table_props, [
-          h(:thead, [
-            h(:tr, [
-              h('th.no_padding', 'Dividend'),
-              h(:th, 'Treasury'),
-              h(:th, share_props, 'Per Share'),
-              h(:th, 'Stock Moves'),
+        if corporation_interest_penalty?(entity)
+          corporation_penalty = "#{entity.name} has " +
+            @game.format_currency(@game.round.interest_penalty[entity]).to_s +
+            ' deducted from its run for interest payments'
+        end
+
+        if player_interest_penalty?(entity)
+          player_penalty = "#{entity.owner.name} paid " +
+            @game.format_currency(@game.round.player_interest_penalty[entity]).to_s +
+            ' to cover the remaining unpaid interest'
+        end
+        penalties = h(:span)
+        penalties = h(:div, [
+          h(:h3, 'Penalties'),
+          h(:p, corporation_penalty),
+          h(:p, player_penalty),
+        ]) if corporation_interest_penalty?(entity) || player_interest_penalty?(entity)
+
+        h(:div, div_props, [
+          penalties,
+          h(:table, table_props, [
+            h(:thead, [
+              h(:tr, [
+                h('th.no_padding', 'Dividend'),
+                h(:th, 'Treasury'),
+                h(:th, share_props, 'Per Share'),
+                h(:th, 'Stock Moves'),
+              ]),
             ]),
+            h(:tbody, payout_options),
           ]),
-          h(:tbody, payout_options),
         ])
+      end
+
+      def corporation_interest_penalty?(entity)
+        @game.round.interest_penalty[entity] if @game.round.respond_to?(:interest_penalty)
+      end
+
+      def player_interest_penalty?(entity)
+        @game.round.player_interest_penalty[entity] if @game.round.respond_to?(:player_interest_penalty)
       end
 
       def cleanup

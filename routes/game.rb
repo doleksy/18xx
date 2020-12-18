@@ -32,10 +32,9 @@ class Api
             game.to_h
           end
 
-          not_authorized! unless users.any? { |u| u.id == user.id || game.user_id == user.id }
-
           r.is 'leave' do
             halt(400, 'Cannot leave because game has started') unless game.status == 'new'
+            halt(400, 'You are not in the game') unless users.any? { |u| u.id == user.id }
             game.remove_player(user)
             game.to_h
           end
@@ -46,6 +45,9 @@ class Api
             game.save
             game.to_h
           end
+
+          not_authorized! unless users.any? { |u| u.id == user.id } || game.user_id == user.id
+
           # POST '/api/game/<game_id>/action'
           r.is 'action' do
             acting, action = nil
@@ -69,7 +71,7 @@ class Api
                 )
 
                 active_players = meta['active_players']
-                acting = users.select { |u| active_players.include?(u.name) }
+                acting = users.select { |u| active_players.include?(u.id) || active_players.include?(u.name) }
 
                 game.round = meta['round']
                 game.turn = meta['turn']
@@ -91,7 +93,7 @@ class Api
                 action_id = r.params['id']
                 halt(400, 'Game out of sync') unless engine.actions.size + 1 == action_id
 
-                r.params['user'] = user.name
+                r.params['user'] = user.id
 
                 engine = engine.process_action(r.params)
                 action = engine.actions.last.to_h
@@ -207,8 +209,8 @@ class Api
   end
 
   def set_game_state(game, engine, users)
-    active_players = engine.active_player_names
-    acting = users.select { |u| active_players.include?(u.name) }
+    active_players = engine.active_players_id
+    acting = users.select { |u| active_players.include?(u.id) }
 
     game.round = engine.round.name
     game.turn = engine.turn

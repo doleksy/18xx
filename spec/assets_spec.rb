@@ -70,6 +70,12 @@ describe 'Assets' do
       {
         # games with config but not full implementation; just do a quick spot check
         '1817' => %w[Pittsburgh],
+        '1817NA' => %w[
+          Anchorage The Klondike Dawson City Hazelton Arctic Edmonton Winnipeg
+          Quebec Europe Seattle Denver Toronto New York Hawaii Los Angeles
+          Guadalajara Mexico City Miami New Orleans Belize South America
+          20 30 40 50 60 80 15 10 B Asia
+        ],
         '1846' => %w[Chicago],
 
         # games with full implementation; verify every string on the map
@@ -170,15 +176,15 @@ describe 'Assets' do
        ['1846: Operating Round 1.1 (of 2) - Place a Token or Lay Track',
         # Minor charter stuff
         'Michigan Southern', 'Trains', '2', 'Cash', 'C15', '$60']],
-      ['1846', 3099, 96, 'issue_shares',
+      ['1846', 3099, 74, 'issue_shares',
        ['1846: Operating Round 1.1 (of 2) - Place a Token or Lay Track',
         'Issue', '1 ($50)', '2 ($100)', '3 ($150)', '4 ($200)']],
-      ['1846', 3099, 120, 'dividend',
+      ['1846', 3099, 94, 'dividend',
        ['Pay or Withhold Dividends',
         '2 right',
         '1 right',
         '1 left']],
-      ['1846', 3099, 186, 'assign',
+      ['1846', 3099, 142, 'assign',
        ['1846: Operating Round 2.1 (of 2) - Assign Steamboat Company',
         'Blondie may assign Steamboat Company to a new hex and/or corporation or minor.',
         'Add $20 per port symbol to all routes run to the assigned location '\
@@ -216,6 +222,7 @@ describe 'Assets' do
        ['Merge',
         'Decline',
         'Corporations that can merge with NdM']],
+      ['18_mex', 17_849, nil, 'endgame', '18MEX: Operating Round 4.2 (of 2) - Game Over - Bankruptcy'],
       ['1817', 15_528, 196, 'merge',
        ['Convert',
         'Merge',
@@ -227,6 +234,13 @@ describe 'Assets' do
         'Merge',
         'Pittsburgh, Shawmut and Northern Railroad',
         'Corporations that can merge with J']],
+      ['1817', 16_852, 996, 'cash_crisis',
+       ['Player owes the bank $294 and must sell shares if possible.']],
+      ['1817', 16_281, 1183, 'buy_sell_post_conversion',
+       ['Merger Round 4.2 (of 2) - Buy/Sell Shares Post Conversion',
+        'New York, Susquehanna and Western Railway']],
+      ['18_chesapeake', 1905, 166, 'blocking_special_track',
+       ['Lay Track for Columbia - Philadelphia Railroad']],
     ].freeze
 
     def render_game(jsonfile, no_actions, string)

@@ -12,6 +12,8 @@ module Engine
 
         def actions(entity)
           return [] if entity.company? || !can_lay_tile?(entity)
+          return [] if entity.receivership?
+          return [] if @game.sr_after_southern
 
           entity == current_entity ? ACTIONS : []
         end
@@ -58,7 +60,7 @@ module Engine
           if hex.tile.nodes.any?
             # tile has a city/town/halt
             hex.tile.nodes.each do |tile_node|
-              nd = node_distances[tile_node] if node_distances[tile_node]
+              nd = node_distances[tile_node]
               if tile_node.city? || tile_node.offboard?
                 return true if nd && nd < max_distance
               elsif nd && nd <= max_distance
