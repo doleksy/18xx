@@ -82,26 +82,18 @@ class Api
 
                 game.save
               else
-                players = users.map { |u| [u.id, u.name] }.to_h
-                engine = Engine::GAMES_BY_TITLE[game.title].new(
-                  players,
-                  id: game.id,
-                  actions: actions_h(game),
-                  optional_rules: game.settings['optional_rules']&.map(&:to_sym),
-                )
-
-                action_id = r.params['id']
-                halt(400, 'Game out of sync') unless engine.actions.size + 1 == action_id
+                engine = Engine::Game.load(game, actions: actions_h(game))
 
                 r.params['user'] = user.id
 
                 engine = engine.process_action(r.params)
-                action = engine.actions.last.to_h
+                halt(500, "Illegal action: #{engine.exception}") if engine.exception
+                action = engine.raw_actions.last.to_h
 
                 Action.create(
                   game: game,
                   user: user,
-                  action_id: action_id,
+                  action_id: action['id'],
                   turn: engine.turn,
                   round: engine.round.name,
                   action: action,
@@ -149,12 +141,7 @@ class Api
 
           # POST '/api/game/<game_id>/start
           r.is 'start' do
-            players = users.map { |u| [u.id, u.name] }.to_h
-            engine = Engine::GAMES_BY_TITLE[game.title].new(
-              players,
-              id: game.id,
-              optional_rules: game.settings['optional_rules']&.map(&:to_sym),
-            )
+            engine = Engine::Game.load(game, actions: [])
             unless game.players.size.between?(*Engine.player_range(engine.class))
               halt(400, 'Player count not supported')
             end

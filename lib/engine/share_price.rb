@@ -59,6 +59,10 @@ module Engine
       @limited = !unlimited_types.include?(type)
     end
 
+    def ==(other)
+      @coordinates == other.coordinates
+    end
+
     def id
       "#{@price},#{@coordinates.join(',')}"
     end
@@ -76,7 +80,7 @@ module Engine
     end
 
     def can_par?
-      @type == :par
+      %i[par par_1 par_2].include?(@type)
     end
 
     def end_game_trigger?

@@ -22,7 +22,6 @@ require 'view/reset'
 class App < Snabberb::Component
   include GameManager
   include UserManager
-  needs :disable_user_errors, default: false
   needs :pin, default: nil
 
   def render
@@ -56,7 +55,7 @@ class App < Snabberb::Component
       case @app_route
       when /new_game/
         h(View::CreateGame)
-      when /[^?](game|hotseat|tutorial)/
+      when /[^?](game|hotseat|tutorial|fixture)/
         render_game
       when /signup/
         h(View::User, type: :signup)
@@ -86,11 +85,13 @@ class App < Snabberb::Component
   end
 
   def render_game
-    match = @app_route.match(%r{(hotseat|game)\/((hs.*_)?\d+)})
+    match = @app_route.match(%r{(hotseat|game|fixture)\/((18.*\/)?(hs.*_)?\d+)})
 
     if !@game_data&.any? # this is a hotseat game
       if @app_route.include?('tutorial')
         enter_tutorial
+      elsif @app_route.include?('fixture')
+        enter_fixture(match[2])
       else
         enter_game(id: match[2], mode: match[1] == 'game' ? :muti : :hotseat, pin: @pin)
       end
@@ -103,7 +104,7 @@ class App < Snabberb::Component
 
     return h('div.padded', 'Loading game...') unless @game_data&.dig('loaded')
 
-    h(View::GamePage, connection: @connection, user: @user, disable_user_errors: @disable_user_errors)
+    h(View::GamePage, connection: @connection, user: @user)
   end
 
   def js_handlers

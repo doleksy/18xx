@@ -15,7 +15,8 @@ module Engine
         end
 
         def process_lay_tile(action)
-          @game.game_error('Cannot do normal tile lay') unless can_lay_tile?(action.entity)
+          raise GameError, 'Cannot do normal tile lay' unless can_lay_tile?(action.entity)
+
           lay_tile_action(action)
           pass! unless remaining_tile_lay?(action.entity)
         end
@@ -24,7 +25,7 @@ module Engine
 
         def remaining_tile_lay?(entity)
           can_lay_tile?(entity) ||
-          (@game.p2_company.owner == entity && @game.p2_company.abilities(:tile_lay)&.count&.positive?)
+          (@game.p2_company.owner == entity && @game.abilities(@game.p2_company, :tile_lay)&.count&.positive?)
         end
       end
     end

@@ -16,11 +16,13 @@ module Engine
 
       GAME_LOCATION = 'Earth.'
       SEED_MONEY = 100
+      GAME_INFO_URL = 'https://github.com/tobymao/18xx/wiki/1817WO'
       GAME_RULES_URL = {
         '1817WO' => 'https://docs.google.com/document/d/1g9QnttpJa8yOCOTnfPaU9hfAZFFzg-rAs_WGy9T38J0/',
         '1817 Rules' => 'https://drive.google.com/file/d/0B1SWz2pNe2eAbnI4NVhpQXV4V0k/view',
       }.freeze
       GAME_DESIGNER = 'Mark Voyer & Brennan Sheremeto'
+      EVENTS_TEXT = G1817::EVENTS_TEXT.merge('nieuw_zeeland_available' => ['Nieuw Zealand opens for new IPOs'])
 
       def self.title
         '1817WO'
@@ -29,6 +31,15 @@ module Engine
       def setup
         super
         @new_zealand_city = hexes.find { |hex| hex.location_name == 'Nieuw Zeeland' }.tile.cities[0]
+        # Put an 1867 style green token in the New Zealand hex
+        @green_token = Token.new(nil, price: 0, logo: '/logos/1817/nz.svg', type: :neutral)
+        @new_zealand_city.exchange_token(@green_token)
+      end
+
+      def event_nieuw_zeeland_available!
+        # Remove the 1867-style green token from the New Zealand hex
+        @log << 'Corporations can now be IPOed in Nieuw Zeeland'
+        @green_token.remove!
       end
 
       # Not genericifying 1817's loan logic just so it can be kept simpler, at least for now
@@ -138,7 +149,7 @@ module Engine
         @companies.each do |company|
           next unless company.owner
 
-          company.abilities(:revenue_change, time: 'has_train') do |ability|
+          abilities(company, :revenue_change, time: 'has_train') do |ability|
             company.revenue = company.owner.trains.any? ? ability.revenue : 0
           end
         end
@@ -149,11 +160,11 @@ module Engine
           Step::G1817::Loan,
           Step::G1817::SpecialTrack,
           Step::G1817::Assign,
-          Step::DiscardTrain,
           Step::G1817::Track,
           Step::Token,
           Step::Route,
           Step::G1817::Dividend,
+          Step::DiscardTrain,
           Step::G1817::BuyTrain,
         ], round_num: round_num)
       end

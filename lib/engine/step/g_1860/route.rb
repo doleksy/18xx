@@ -58,6 +58,11 @@ module Engine
           entity = action.entity
           @round.routes = action.routes
 
+          if @round.routes.empty? && @game.legal_route?(entity) && (entity.trains.any? || @game.insolvent?(entity)) &&
+              (!entity.receivership? || !@game.nationalization)
+            raise GameError, 'Must run a route'
+          end
+
           # the following two checks must be made here, after all routes have been defined
           if @round.routes.reject { |r| r.connections.empty? }.any?
             @game.check_home_token(entity, @round.routes)
@@ -67,15 +72,17 @@ module Engine
 
           @round.routes.each do |route|
             train = route.train
+            leased = ' '
             if train.owner && @game.train_owner(train) != entity
-              @game.game_error("Cannot run another corporation's train. refresh")
-              @game.game_error('Cannot run train that operated') if train.operated
+              raise GameError, "Cannot run another corporation's train. refresh"
             end
-            @game.game_error('Cannot run train twice') if trains[train]
+            raise GameError, 'Cannot run train twice' if trains[train]
+
+            leased = ' (leased) ' if @game.insolvent?(entity)
 
             trains[train] = true
-            @log << "#{entity.name} runs a #{train.name} train for "\
-              "#{@game.format_currency(route.revenue)}: #{@game.revenue_str(route)}"
+            @log << "#{entity.name} runs a #{train.name} train#{leased}for "\
+              "#{@game.format_currency(route.revenue)}: #{route.revenue_str}"
           end
           pass!
         end

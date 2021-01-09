@@ -43,7 +43,7 @@ module View
             children << h(Corporation, corporation: corporation)
             children << h(BuySellShares, corporation: corporation)
             children << h(Player, game: @game, player: entity) if entity.player?
-            return h(:div, children)
+            return h(:div, children.compact)
           end
 
           buttons = []
@@ -112,7 +112,7 @@ module View
           end
 
           right = []
-          right << h(Map, game: @game) if actions.include?('remove_token')
+          right << h(Map, game: @game) if actions.include?('remove_token') || actions.include?('place_token')
           # Switch to the OR mode layout
           if right.any?
             left_props = {

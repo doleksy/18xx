@@ -16,15 +16,39 @@ module Engine
           'Moving Bid Auction for Companies'
         end
 
+        def active?
+          !all_passed?
+        end
+
+        def all_passed?
+          entities.all?(&:passed?)
+        end
+
         def available
           @companies
+        end
+
+        def skip!
+          entity = @round.entities[@round.entity_index]
+          return unless entity.player?
+          return if entity.cash > committed_cash(entity)
+
+          entity.pass!
+          log_skip(entity)
+          end_auction! if all_passed?
+          @round.next_entity_index!
+          skip! if active?
+        end
+
+        def log_skip(entity)
+          @log << "#{entity.name} skips bidding as all their cash is committed"
         end
 
         def process_pass(action)
           entity = action.entity
           @log << "#{entity.name} passes bidding"
           entity.pass!
-          all_passed! if entities.all?(&:passed?)
+          end_auction! if all_passed?
           @round.next_entity_index!
         end
 
@@ -40,8 +64,9 @@ module Engine
           @round.next_entity_index!
         end
 
-        def actions(_entity)
-          return [] if entities.all?(&:passed?)
+        def actions(entity)
+          return [] unless active?
+          return [] if entity.player? && entity.cash <= committed_cash(entity)
 
           ACTIONS
         end
@@ -114,7 +139,7 @@ module Engine
           true
         end
 
-        def all_passed!
+        def end_auction!
           # company is deleted from @companies when they are won, so we can't loop
           # through @companies instead of @bids.
           @bids.each do |company, bids|
@@ -151,7 +176,7 @@ module Engine
                   "with #{@bids[company].size > 1 ? 'a' : 'the only'} "\
                   "bid of #{@game.format_currency(price)}"
 
-          company.abilities(:shares) do |ability|
+          @game.abilities(company, :shares) do |ability|
             ability.shares.each do |share|
               if share.president
                 @round.companies_pending_par << company
@@ -162,27 +187,20 @@ module Engine
           end
         end
 
-        def accept_bid(bid)
-          price = bid.price
-          company = bid.company
-          player = bid.entity
-          @bids.delete(company)
-          buy_company(player, company, price)
-        end
-
         def add_bid(bid)
           company = bid.company || bid.corporation
           entity = bid.entity
           price = bid.price
           min = min_bid(company)
 
-          @game.game_error("Minimum bid is #{@game.format_currency(min)} for #{company.name}") if price < min
+          raise GameError, "Minimum bid is #{@game.format_currency(min)} for #{company.name}" if price < min
           if @game.class::MUST_BID_INCREMENT_MULTIPLE && ((price - min) % min_increment).nonzero?
-            @game.game_error("Must increase bid by a multiple of #{@game.format_currency(min_increment)}")
+            raise GameError, "Must increase bid by a multiple of #{@game.format_currency(min_increment)}"
           end
+
           if price > max_bid(entity, company)
-            @game.game_error("Cannot afford bid. Maximum possible bid is
-              #{@game.format_currency(max_bid(entity, company))}")
+            raise GameError, 'Cannot afford bid. Maximum possible bid is '\
+              "#{@game.format_currency(max_bid(entity, company))}"
           end
 
           bids = @bids[company]
@@ -201,17 +219,18 @@ module Engine
           from_price = bid.from_price
           min = min_bid(company)
 
-          @game.game_error("Minimum bid is #{@game.format_currency(min)} for #{company.name}") if price < min
+          raise GameError, "Minimum bid is #{@game.format_currency(min)} for #{company.name}" if price < min
           if @game.class::MUST_BID_INCREMENT_MULTIPLE && ((price - min) % min_increment).nonzero?
-            @game.game_error("Must increase bid by a multiple of #{@game.format_currency(min_increment)}")
+            raise GameError, "Must increase bid by a multiple of #{@game.format_currency(min_increment)}"
           end
+
           if price > max_bid(entity, company)
-            @game.game_error("Cannot afford bid. Maximum possible bid is
-              #{@game.format_currency(max_bid(entity, company))}")
+            raise GameError, 'Cannot afford bid. Maximum possible bid is '\
+              "#{@game.format_currency(max_bid(entity, company))}"
           end
           if price < from_price + min_increment
-            @game.game_error("Bid movement must increase original bid by a multiple of
-              #{@game.format_currency(min_increment)}")
+            raise GameError, 'Bid movement must increase original bid by a multiple of '\
+              "#{@game.format_currency(min_increment)}"
           end
 
           @bids[from_company].reject! { |b| b.entity == entity && b.price == from_price }

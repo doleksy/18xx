@@ -9,6 +9,8 @@ module Engine
                   :lanes, :nodes, :offboard, :stops, :terminal, :town, :track
 
       LANES = [[1, 0].freeze, [1, 0].freeze].freeze
+      MATCHES_BROAD = %i[broad dual].freeze
+      MATCHES_NARROW = %i[narrow dual].freeze
 
       def self.decode_lane_spec(x_lane)
         if x_lane
@@ -61,7 +63,19 @@ module Engine
 
       def <=(other)
         other_ends = other.ends
-        ends.all? { |t| other_ends.any? { |o| t <= o } }
+        ends.all? { |t| other_ends.any? { |o| t <= o } } && tracks_match(other)
+      end
+
+      def tracks_match(other_path, dual_ok: false)
+        other_track = other_path.track
+        case @track
+        when :broad
+          MATCHES_BROAD.include?(other_track)
+        when :narrow
+          MATCHES_NARROW.include?(other_track)
+        when :dual
+          dual_ok || other_track == :dual
+        end
       end
 
       def ends
@@ -202,7 +216,7 @@ module Engine
       def inspect
         name = self.class.name.split('::').last
         if single?
-          "<#{name}: hex: #{hex&.name}, exit: #{exits}>"
+          "<#{name}: hex: #{hex&.name}, exit: #{exits}, track: #{track}>"
         else
           "<#{name}: hex: #{hex&.name}, exit: #{exits}, lanes: #{@lanes.first} #{@lanes.last}>"
         end

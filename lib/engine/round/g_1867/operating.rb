@@ -10,6 +10,10 @@ module Engine
           minors, majors = @game.corporations.select(&:floated?).sort.partition { |c| c.type == :minor }
           minors + majors
         end
+
+        def skip_entity?(entity)
+          !entity.floated? || !@game.corporations.include?(entity)
+        end
       end
     end
   end

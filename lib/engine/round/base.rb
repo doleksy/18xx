@@ -85,15 +85,18 @@ module Engine
 
           process = s.actions(action.entity).include?(type)
           blocking = s.blocking?
-          @game.game_error("Step #{s.description} cannot process #{action.to_h}") if blocking && !process
+          if blocking && !process
+            raise GameError, "Blocking step #{s.description} cannot process action #{action['id']}"
+          end
 
           blocking || process
         end
-        @game.game_error("No step found for action #{type} at #{action.id}: #{action.to_h}") unless step
+        raise GameError, "No step found for action #{type} at #{action.id}: #{action.to_h}" unless step
 
         step.acted = true
         step.send("process_#{action.type}", action)
 
+        after_process_before_skip(action)
         skip_steps
         clear_cache!
         after_process(action)
@@ -134,6 +137,8 @@ module Engine
       end
 
       def next_entity_index!
+        # If overriding, make sure to call @game.next_turn!
+        @game.next_turn!
         @entity_index = (@entity_index + 1) % @entities.size
       end
 
@@ -161,6 +166,8 @@ module Engine
       end
 
       def before_process(_action); end
+
+      def after_process_before_skip(_action); end
 
       def after_process(_action); end
     end

@@ -2,11 +2,13 @@
 
 require_relative '../base'
 require_relative '../../token'
+require_relative '../token_merger'
 
 module Engine
   module Step
     module G1867
       class Merge < Base
+        include TokenMerger
         LIMIT_OWNED_BY_ONE_ENTITY = 6
         LIMIT_MERGE = 10
 
@@ -18,16 +20,23 @@ module Engine
 
           return ['merge'] if @converting || @merge_major
 
-          actions << 'merge' if can_merge?(entity)
-          actions << 'convert' if can_convert?(entity)
+          actions << 'merge' # performance improvement
+          actions << 'convert' if !@merging && can_convert?(entity)
           actions << 'pass' if actions.any?
           actions
         end
 
         def merge_name
           return 'Convert' if @converting
+          return 'Finish Merge' if @merge_major
 
           'Merge'
+        end
+
+        def pass_description
+          return 'Done Adding Corporations' if @merging
+
+          super
         end
 
         def can_convert?(entity)
@@ -40,6 +49,7 @@ module Engine
 
         def description
           return 'Choose Major Corporation' if @converting || @merge_major
+          return 'Merge Minor Corporations' if @merging
 
           'Convert or Merge Minor Corporation'
         end
@@ -53,14 +63,13 @@ module Engine
           target = action.corporation
 
           if !target || !mergeable(corporation).include?(target)
-            @game.game_error("Choose a corporation to merge with #{corporation.name}")
+            raise GameError, "Choose a corporation to merge with #{corporation.name}"
           end
 
           @game.stock_market.set_par(target, corporation.share_price)
           owner = corporation.owner
 
           @converting = nil
-          @game.close_corporation(corporation)
 
           share = target.shares.first
           @game.share_pool.buy_shares(owner, share.to_bundle, exchange: :free)
@@ -68,11 +77,14 @@ module Engine
           move_tokens(corporation, target)
           receiving = move_assets(corporation, target)
 
+          @game.close_corporation(corporation)
+
           @log << "#{corporation.name} converts into #{target.name} receiving #{receiving.join(', ')}"
 
           # Replace the entity with the new one.
           @round.entities[@round.entity_index] = target
           @round.converted = target
+          @round.merge_type = :convert
           # All players are eligable to buy shares unlike merger
           @round.share_dealing_players = @game.players.rotate(@game.players.index(target.owner))
           @round.share_dealing_multiple = [corporation.owner]
@@ -86,13 +98,13 @@ module Engine
             from.spend(from.cash, to)
           end
 
-          companies = from.transfer(:companies, to).map(&:name)
+          companies = @game.transfer(:companies, from, to).map(&:name)
           receiving << "companies (#{companies.join(', ')})" if companies.any?
 
-          loans = from.transfer(:loans, to).size
+          loans = @game.transfer(:loans, from, to).size
           receiving << "loans (#{loans})" if loans.positive?
 
-          trains = from.transfer(:trains, to).map(&:name)
+          trains = @game.transfer(:trains, from, to).map(&:name)
           receiving << "trains (#{trains})" if trains.any?
 
           receiving
@@ -121,23 +133,30 @@ module Engine
           target = action.corporation
           initiator = action.entity.owner
           # PAR price is average of lowest and highest priced
-          # rounded down between 100-200 (200 can be ignored since max price of minor) between
+          # rounded down between 100-200
           min = @merging.map { |c| c.share_price.price }.min
           max = @merging.map { |c| c.share_price.price }.max
-          merged = [100, (max + min) / 2].max
+          merged_par = @game.find_share_price([200, [100, (max + min)].max].min)
 
-          @game.stock_market.set_par(target, @game.find_share_price(merged))
+          # Players who owned shares are eligable to buy shares unlike merger
+          owners = @merging.map(&:owner)
+          players = @game.players.select { |p| owners.include?(p) }
+          players = players.rotate(players.index(initiator))
+
+          if players.none? { |player| player.cash >= merged_par.price || owners.count(player) >= 2 }
+            raise GameError, 'Merge impossible, no player can become president'
+          end
+
+          @game.stock_market.set_par(target, merged_par)
 
           # Replace the entity with the new one.
           @round.entities[@round.entity_index] = target
 
           @merge_major = false
-          owners = []
-          # @todo: sort merging around the initiator then table order
-          @merging.each do |corporation|
+
+          # Transfer assets starting with the initiator
+          @merging.sort_by { |m| players.index(m.owner) }.each do |corporation|
             owner = corporation.owner
-            owners << owner
-            @game.close_corporation(corporation)
 
             share = target.shares.last
 
@@ -151,23 +170,40 @@ module Engine
               @game.share_pool.buy_shares(owner, share.to_bundle, exchange: :free)
             end
 
-            # @todo: token reduction code
             move_tokens(corporation, target)
-            receiving = move_assets(corporation, target)
 
+            receiving = move_assets(corporation, target)
+            @game.close_corporation(corporation)
             @log << "#{corporation.name} merges into #{target.name} receiving #{receiving.join(', ')}"
             @round.entities.delete(corporation)
+          end
+
+          remove_duplicate_tokens(target, @merging)
+          if tokens_above_limits?(target, @merging)
+            @game.log << "#{target.name} will be above token limit and must decide which tokens to remove"
+            @round.corporations_removing_tokens = [target] + @merging
+          else
+            move_tokens_to_surviving(target, @merging)
+
+            # Add the $40 token back
+            if target.tokens.size < 3
+              new_token = Engine::Token.new(target, price: 40)
+              target.tokens << new_token
+            end
+
+            tokens = target.tokens.map { |t| t.city&.hex&.id }
+            @log << "#{target.name} has tokens (#{target.tokens.size}: hexes #{tokens.compact}) after merger"
           end
 
           # Deleting the entity changes turn order, restore it.
           @round.goto_entity!(target) unless @round.entities.empty?
 
+          @merging = nil
           @round.converted = target
-          # Players who owned shares are eligable to buy shares unlike merger
-          players = @game.players.select { |p| owners.include?(p) }
-          @round.share_dealing_players = players.rotate(players.index(initiator))
+          @round.merge_type = :merge
+
+          @round.share_dealing_players = players
           @round.share_dealing_multiple = players
-          # @todo: 2 tokens, less than 20% ownership
         end
 
         def process_merge(action)
@@ -175,8 +211,8 @@ module Engine
 
           return finish_merge_to_major(action) if @merge_major
 
-          unless mergeable(action.entity).include?(action.corporation)
-            @game.game_error("Cannot merge with t#{action.corporation.name}")
+          if !@game.loading && !mergeable(action.entity).include?(action.corporation)
+            raise GameError, "Cannot merge with t#{action.corporation.name}"
           end
 
           @merging ||= [action.entity]
@@ -232,12 +268,12 @@ module Engine
           available = []
           # Mergeable candidates must be connected by track, minors only have one token which simplifies it
           mergeable.each do |corp|
-            cities = @game.graph.connected_nodes(corp).keys
-            corporations = cities.flat_map { |c| c.tokens.compact.map(&:corporation) }
-            available += corporations - mergeable
+            parts = @game.graph.connected_nodes(corp).keys
+            corporations = parts.select(&:city?).flat_map { |c| c.tokens.compact.map(&:corporation) }
+            available.concat(corporations - mergeable)
           end
 
-          available.uniq.reject { |c| c.type == :major || owner_at_limit.include?(c.owner) }
+          available.uniq.reject { |c| c.type != :minor || owner_at_limit.include?(c.owner) }
         end
 
         def mergeable(corporation)
@@ -258,6 +294,7 @@ module Engine
         def round_state
           {
             converted: nil,
+            merge_type: nil,
             share_dealing_players: [],
             share_dealing_multiple: [],
           }

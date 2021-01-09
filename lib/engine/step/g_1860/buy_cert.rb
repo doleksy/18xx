@@ -15,7 +15,7 @@ module Engine
         MIN_BID_RAISE = 5
 
         def setup
-          @companies = @game.companies.select { |c| c.abilities(:exchange) }.sort +
+          @companies = @game.companies.select { |c| @game.abilities(c, :exchange) }.sort +
             @game.corporations.select { |c| @game.corp_layer(c) == 1 }
           @bids = {}
           setup_auction
@@ -70,7 +70,7 @@ module Engine
           share_price = action.share_price
           corporation = action.corporation
           entity = action.entity
-          @game.game_error("#{corporation} cannot be parred") unless corporation.can_par?(entity)
+          raise GameError, "#{corporation} cannot be parred" unless @game.can_par?(corporation, entity)
 
           @game.stock_market.set_par(corporation, share_price)
           shares = corporation.shares.first
@@ -102,10 +102,10 @@ module Engine
             buy_company(player, action.company, price)
           else
             if price > max_player_bid(player)
-              @game.game_error("Cannot afford bid. Maximum possible bid is #{max_player_bid(player)}")
+              raise GameError, "Cannot afford bid. Maximum possible bid is #{max_player_bid(player)}"
             end
 
-            @game.game_error("Must bid at least #{min_player_bid}") if price < min_player_bid
+            raise GameError, "Must bid at least #{min_player_bid}" if price < min_player_bid
 
             @log << "#{player.name} bids #{@game.format_currency(price)}"
 

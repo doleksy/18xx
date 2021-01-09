@@ -9,23 +9,17 @@ module Engine
   module Game
     class G1867 < Base
       register_colors(black: '#16190e',
-                      blue: '#165633',
-                      brightGreen: '#0a884b',
-                      brown: '#984573',
-                      gold: '#904098',
-                      gray: '#984d2d',
-                      green: '#bedb86',
-                      lavender: '#e96f2c',
-                      lightBlue: '#bedef3',
-                      lightBrown: '#bec8cc',
-                      lime: '#00afad',
-                      navy: '#003d84',
-                      natural: '#e31f21',
-                      orange: '#f2a847',
-                      pink: '#ee3e80',
+                      blue: '#0189d1',
+                      brown: '#7b352a',
+                      gray: '#7c7b8c',
+                      green: '#3c7b5c',
+                      lightBlue: '#4cb5d2',
+                      lightishBlue: '#0097df',
+                      teal: '#009595',
+                      orange: '#d75500',
+                      magenta: '#d30869',
+                      purple: '#772282',
                       red: '#ef4223',
-                      turquoise: '#0095da',
-                      violet: '#e48329',
                       white: '#fff36b',
                       yellow: '#ffdea8')
 
@@ -40,29 +34,25 @@ module Engine
       HOME_TOKEN_TIMING = :float
       MUST_BID_INCREMENT_MULTIPLE = true
       MUST_BUY_TRAIN = :always # mostly true, needs custom code
-      POOL_SHARE_DROP = :each
+      POOL_SHARE_DROP = :none
       SELL_MOVEMENT = :left_block_pres
       ALL_COMPANIES_ASSIGNABLE = true
       SELL_AFTER = :operate
-      DEV_STAGE = :prealpha
+      DEV_STAGE = :alpha
       SELL_BUY_ORDER = :sell_buy
-
-      ASSIGNMENT_TOKENS = {
-        'bridge' => '/icons/1817/bridge_token.svg',
-        'mine' => '/icons/1817/mine_token.svg',
-      }.freeze
 
       GAME_END_CHECK = { bank: :current_or, custom: :one_more_full_or_set }.freeze
 
       HEX_WITH_O_LABEL = %w[J12].freeze
-      HEX_UPGRADES_FOR_O = %w[201 202 203 207 208 622 623 801 X8].freeze
+      HEX_UPGRADES_FOR_O = %w[201 202 203 207 208 621 622 623 801 X8].freeze
 
       CERT_LIMIT_CHANGE_ON_BANKRUPTCY = true
 
       # Two lays with one being an upgrade, second tile costs 20
       TILE_LAYS = [{ lay: true, upgrade: true }, { lay: true, upgrade: :not_if_upgraded, cost: 20 }].freeze
 
-      LIMIT_TOKENS = 8
+      LIMIT_TOKENS_AFTER_MERGER = 2
+      MINIMUM_MINOR_PRICE = 50
 
       EVENTS_TEXT = Base::EVENTS_TEXT.merge('signal_end_game' => ['Signal End Game',
                                                                   'Game Ends 3 ORs after purchase/export'\
@@ -71,6 +61,12 @@ module Engine
                                             'majors_can_ipo' => ['Majors can be ipoed'],
                                             'minors_cannot_start' => ['Minors cannot start'],
                                             'minors_nationalized' => ['Minors are nationalized'],
+                                            'nationalize_companies' =>
+                                            ['Nationalize Companies',
+                                             'All companies close paying their owner their value'],
+                                            'train_trade_allowed' =>
+                                            ['Train trade in allowed',
+                                             'Trains can be traded in for 50% towards Phase 8 trains'],
                                             'trainless_nationalization' =>
                                             ['Trainless Nationalization',
                                              'Operating Trainless Minors are nationalized'\
@@ -82,7 +78,11 @@ module Engine
                                             max_price: 'Maximum price for a minor').freeze
       STOCKMARKET_COLORS = Base::STOCKMARKET_COLORS.merge(par_1: :orange, par_2: :green).freeze
       CORPORATION_SIZES = { 2 => :small, 5 => :medium, 10 => :large }.freeze
+      # A token is reserved for Montreal is reserved for nationalization
+      CN_RESERVATIONS = ['L12'].freeze
+      GREEN_CORPORATIONS = %w[BBG LPS QLS SLA TGB THB].freeze
       include InterestOnLoans
+      include CompanyPriceUpToFace
 
       # Minors are done as corporations with a size of 2
 
@@ -94,6 +94,22 @@ module Engine
 
       def interest_rate
         5 # constant
+      end
+
+      def legal_tile_rotation?(_entity, hex, tile)
+        hex.tile.stubs.empty? || tile.exits.include?(hex.tile.stubs.first.edge)
+      end
+
+      def init_corporations(stock_market)
+        major_min_price = stock_market.par_prices.map(&:price).min
+        minor_min_price = MINIMUM_MINOR_PRICE
+        self.class::CORPORATIONS.map do |corporation|
+          Corporation.new(
+            min_price: corporation[:type] == :major ? major_min_price : minor_min_price,
+            capitalization: self.class::CAPITALIZATION,
+            **corporation.merge(corporation_opts),
+          )
+        end
       end
 
       def interest_owed_for_loans(loans)
@@ -109,8 +125,9 @@ module Engine
       end
 
       def home_token_locations(corporation)
+        # Can only place home token in cities that have no other tokens.
         open_locations = hexes.select do |hex|
-          hex.tile.cities.any? { |city| city.tokenable?(corporation, free: true) }
+          hex.tile.cities.any? { |city| city.tokenable?(corporation, free: true) && city.tokens.none? }
         end
 
         return open_locations if corporation.type == :minor
@@ -140,7 +157,8 @@ module Engine
       end
 
       def take_loan(entity, loan)
-        game_error("Cannot take more than #{maximum_loans(entity)} loans") unless can_take_loan?(entity)
+        raise GameError, "Cannot take more than #{maximum_loans(entity)} loans" unless can_take_loan?(entity)
+
         name = entity.name
         amount = loan.amount - 5
         @log << "#{name} takes a loan and receives #{format_currency(amount)}"
@@ -150,11 +168,11 @@ module Engine
       end
 
       def repay_loan(entity, loan)
-        @log << "#{entity.name} pays off a loan for #{format_currency(amount)}"
-        entity.spend(amount, bank)
+        @log << "#{entity.name} pays off a loan for #{format_currency(loan.amount)}"
+        entity.spend(loan.amount, bank)
 
         entity.loans.delete(loan)
-        @game.loans << loan
+        @loans << loan
       end
 
       def can_take_loan?(entity)
@@ -163,18 +181,25 @@ module Engine
           @loans.any?
       end
 
-      def buying_power(entity, full = false)
+      def buying_power(entity, full: false)
         return entity.cash unless full
         return entity.cash unless entity.corporation?
 
         # Loans are actually generate $5 less than when taken out.
-        entity.cash + ((maximum_loans(entity) - entity.loans.size) * @loan_value - 5)
+        entity.cash + ((maximum_loans(entity) - entity.loans.size) * (@loan_value - 5))
+      end
+
+      def unstarted_corporation_summary
+        minor, major = @corporations.reject(&:ipoed).partition { |c| c.type == :minor }
+        "#{minor.size} minor, #{major.size} major"
       end
 
       def nationalize!(corporation)
         @log << "#{corporation.name} is nationalized"
 
-        repay_loan(corporation, corporation.loan.first) while corporation.cash > @loan_value && corporation.loans.any?
+        while corporation.cash > @loan_value && !corporation.loans.empty?
+          repay_loan(corporation, corporation.loans.first)
+        end
 
         # Move once automatically
         price = corporation.share_price.price
@@ -207,6 +232,30 @@ module Engine
                           "#{format_currency(per_share)} (#{receivers})"
         end
 
+        # Rules say if not enough tokens remain, do it in highest payout then randomly
+        # We'll treat random as in hex order
+        corporation.tokens.select(&:used)
+        .sort_by { |t| [t.city.max_revenue, t.city.hex.id] }
+        .reverse
+        .each do |token|
+          city = token.city
+          token.remove!
+
+          next if city.tile.cities.any? { |c| c.tokened_by?(@cn_corporation) }
+
+          new_token = @cn_corporation.next_token
+          next unless new_token
+
+          if @cn_reservations.include?(city.hex.id)
+            @cn_reservations.delete(city.hex.id)
+          elsif @cn_corporation.tokens.count { |t| !t.used } == @cn_reservations.size
+            # Don't place if only reservations are left
+            next
+          end
+
+          city.place_token(@cn_corporation, new_token, check_tokenable: false)
+        end
+
         # Close corp (minors close, majors reset)
         if corporation.type == :minor
           close_corporation(corporation)
@@ -215,14 +264,25 @@ module Engine
         end
       end
 
+      def place_cn_montreal_token(tile)
+        return unless @cn_reservations.any?
+        return if tile.cities.any? { |c| c.tokened_by?(@cn_corporation) }
+        return unless (new_token = @cn_corporation.next_token)
+
+        @log << 'CN lays token on Montreal'
+        @cn_reservations.delete(tile.hex.id)
+        # Montreal only has the one city, given it should be reserved then next token should be valid
+        tile.cities.first.place_token(@cn_corporation, new_token, check_tokenable: false)
+      end
+
       def revenue_for(route, stops)
         revenue = super
 
-        game_error('Route visits same hex twice') if route.hexes.size != route.hexes.uniq.size
+        raise GameError, 'Route visits same hex twice' if route.hexes.size != route.hexes.uniq.size
 
         route.corporation.companies.each do |company|
-          company.abilities(:hex_bonus) do |ability|
-            revenue += stops.map { |s| s.hex.id }.uniq.sum { |id| ability.hexes.include?(id) ? ability.amount : 0 }
+          abilities(company, :hex_bonus) do |ability|
+            revenue += stops.map { |s| s.hex.id }.uniq&.sum { |id| ability.hexes.include?(id) ? ability.amount : 0 }
           end
         end
 
@@ -231,7 +291,7 @@ module Engine
         # Timmins
         timmins = stops.find { |stop| stop.hex.name == 'D2' }
 
-        revenue += 40 if capitals && timmins
+        revenue += 40 * (route.train.multiplier || 1) if capitals && timmins
 
         revenue
       end
@@ -282,8 +342,10 @@ module Engine
 
         remaining_stops = mandatory_distance['pay'] - mandatory_stops.size
 
-        # Allocate optional stops
-        stops, revenue = optional_stops.combination(remaining_stops.to_i).map do |stops|
+        # Allocate optional stops, combination returns nothing if stops doesn't cover the remaining stops
+        combinations = optional_stops.combination(remaining_stops.to_i).to_a
+        combinations = [optional_stops] if combinations.empty?
+        stops, revenue = combinations.map do |stops|
           # Make sure this set of stops is legal
           # 1) At least one stop must have a token (for 5+5E train)
           next if need_token && stops.none? { |stop| stop.tokened_by?(route.corporation) }
@@ -321,14 +383,16 @@ module Engine
       def operating_round(round_num)
         Round::G1867::Operating.new(self, [
           Step::G1867::MajorTrainless,
-          Step::DiscardTrain,
           Step::BuyCompany,
           Step::G1867::RedeemShares,
           Step::G1867::Track,
           Step::G1867::Token,
           Step::Route,
           Step::G1867::Dividend,
+          # The blocking buy company needs to be before loan operations
+          [Step::BuyCompany, blocks: true],
           Step::G1867::LoanOperations,
+          Step::DiscardTrain,
           Step::G1867::BuyTrain,
           [Step::BuyCompany, blocks: true],
         ], round_num: round_num)
@@ -337,6 +401,7 @@ module Engine
       def or_round_finished
         current_phase = phase.name.to_i
         depot.export! if current_phase >= 4 && current_phase <= 7
+        post_train_buy
       end
 
       def new_or!
@@ -358,15 +423,15 @@ module Engine
             new_operating_round
           when Round::Operating
             or_round_finished
-            if phase.name.to_i <= 3
+            if phase.name.to_i < 3 || phase.name.to_i >= 8
               new_or!
             else
               @log << "-- #{round_description('Merger', @round.round_num)} --"
               Round::G1867::Merger.new(self, [
-                # Step::G1817::ReduceTokens, #@todo
                 Step::G1867::MajorTrainless,
-                Step::DiscardTrain,
-                Step::G1867::PostMergerShares,
+                Step::G1867::PostMergerShares, # Step C & D
+                Step::G1867::ReduceTokens, # Step E
+                Step::DiscardTrain, # Step F
                 Step::G1867::Merge,
               ], round_num: @round.round_num)
             end
@@ -385,6 +450,8 @@ module Engine
       end
 
       def round_end
+        return Round::Operating if phase.name.to_i >= 8
+
         Round::G1867::Merger
       end
 
@@ -397,12 +464,14 @@ module Engine
       end
 
       def setup
+        setup_company_price_up_to_face
+
         # Hide the special 3 company
         @hidden_company = company_by_id('3')
-        @companies.delete(@hidden_company)
 
         # CN corporation only exists to hold tokens
         @cn_corporation = corporation_by_id('CN')
+        @cn_reservations = CN_RESERVATIONS.dup
         @corporations.delete(@cn_corporation)
 
         @green_tokens = []
@@ -410,12 +479,10 @@ module Engine
           case hex.id
           when 'D2'
             token = Token.new(@cn_corporation, price: 0, logo: '/logos/1867/neutral.svg', type: :neutral)
-            @cn_corporation.tokens << token
             hex.tile.cities.first.exchange_token(token)
             @green_tokens << token
           when 'L12'
             token = Token.new(@cn_corporation, price: 0, logo: '/logos/1867/neutral.svg', type: :neutral)
-            @cn_corporation.tokens << token
             hex.tile.cities.last.exchange_token(token)
             @green_tokens << token
           when 'F16'
@@ -428,9 +495,8 @@ module Engine
         @corporations.select { |c| c.type == :minor }.each { |c| c.max_share_price = max_price }
 
         # Move green and majors out of the normal list
-        green = COLORS[:green]
         @corporations, @future_corporations = @corporations.partition do |corporation|
-          corporation.type == :minor && corporation.color != green
+          corporation.type == :minor && !GREEN_CORPORATIONS.include?(corporation.id)
         end
       end
 
@@ -452,6 +518,8 @@ module Engine
         # Done elsewhere
       end
 
+      def event_train_trade_allowed!; end
+
       def event_minors_cannot_start!
         @corporations, removed = @corporations.partition do |corporation|
           corporation.owned_by_player? || corporation.type != :minor
@@ -471,7 +539,8 @@ module Engine
       def event_signal_end_game!
         # There's always 3 ORs after the 8 train is bought
         @final_operating_rounds = 3
-
+        # Hit the game end check now to set the correct turn
+        game_end_check
         @log << "First 8 train bought/exported, ending game at the end of #{@turn + 1}.#{@final_operating_rounds}"
       end
 
@@ -494,6 +563,25 @@ module Engine
 
         @trainless_major = @trainless_major.sort.reverse
         @trainless_nationalization = false
+      end
+
+      def event_nationalize_companies!
+        @log << '-- Event: Private companies are nationalized --'
+
+        @companies.each do |company|
+          next if company.closed?
+
+          if (ability = abilities(company, :close))
+            next if ability.when == 'never' ||
+              @phase.phases.any? { |phase| ability.when == phase[:name] }
+          end
+
+          if company != @hidden_company
+            @bank.spend(company.value, company.owner)
+            @log << "#{company.name} nationalized from #{company.owner.name} for #{format_currency(company.value)}"
+          end
+          company.close!
+        end
       end
     end
   end

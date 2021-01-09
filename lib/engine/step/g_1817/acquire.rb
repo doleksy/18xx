@@ -3,7 +3,7 @@
 require_relative '../base'
 require_relative '../../token'
 require_relative '../passable_auction'
-require_relative 'token_merger'
+require_relative '../token_merger'
 
 module Engine
   module Step
@@ -51,7 +51,8 @@ module Engine
         end
 
         def can_payoff?(entity)
-          entity == @buyer && @unpaid_loans.positive? && @buyer.cash >= @game.loan_value && !@passed_payoff_loans
+          # Parens are to workaround an Opal bug
+          (entity == @buyer) && @unpaid_loans.positive? && @buyer.cash >= @game.loan_value && !@passed_payoff_loans
         end
 
         def active_entities
@@ -192,12 +193,10 @@ module Engine
           acquired_corp = @winner.corporation
 
           if !buyer || !mergeable(acquired_corp).include?(buyer)
-            @game.game_error("Choose a corporation to acquire #{acquired_corp.name}")
+            raise GameError, "Choose a corporation to acquire #{acquired_corp.name}"
           end
 
-          if buyer.owner != @winner.entity
-            @game.game_error("Target corporation must be owned by #{@winner.entity.name}")
-          end
+          raise GameError, "Target corporation must be owned by #{@winner.entity.name}" if buyer.owner != @winner.entity
 
           @buyer = buyer
 
@@ -216,14 +215,14 @@ module Engine
           end
           @liquidation_cash += @winner.price if acquired_corp.share_price.liquidation?
           @shareholder_cash = @winner.price
-          companies = acquired_corp.transfer(:companies, buyer).map(&:name)
+          companies = @game.transfer(:companies, acquired_corp, buyer).map(&:name)
           receiving << "companies (#{companies.join(', ')})" if companies.any?
 
-          @unpaid_loans = acquired_corp.transfer(:loans, buyer).size
+          @unpaid_loans = @game.transfer(:loans, acquired_corp, buyer).size
           receiving << "loans (#{@unpaid_loans})" if @unpaid_loans.positive?
           # share price modification is delayed until after the player has passed paying off loans
 
-          trains = acquired_corp.transfer(:trains, buyer).map(&:name)
+          trains = @game.transfer(:trains, acquired_corp, buyer).map(&:name)
           receiving << "trains (#{trains})" if trains.any?
 
           remove_duplicate_tokens(buyer, acquired_corp)
@@ -413,7 +412,7 @@ module Engine
           # Notionally pay off all the acquired corps loans, and then they can be taken again
           loan_payoff = acquired_corp.loans.size * @game.loan_value
 
-          buying_power(corporation) +
+          @game.buying_power(corporation, extra_loans: acquired_corp.loans.size) +
           acquired_corp.cash +
           treasury_share_compensation(acquired_corp) -
           loan_payoff
@@ -436,7 +435,8 @@ module Engine
           corporation = action.corporation
           price = action.price
 
-          @game.game_error("Bid #{price} is not a multple of 10") unless (price % 10).zero?
+          raise GameError, "Bid #{price} is not a multple of 10" unless (price % 10).zero?
+
           @log << "#{entity.name} bids #{@game.format_currency(price)} for #{corporation.name}"
           add_bid(action)
           resolve_bids
@@ -444,8 +444,8 @@ module Engine
 
         def process_assign(action)
           corporation = action.target
-          @game.game_error("Can only assign if offering for sale #{corporation.name}") unless @mode == :offered
-          @game.game_error("Can only offer up #{@offer.name}") unless corporation == @offer
+          raise GameError, "Can only assign if offering for sale #{corporation.name}" unless @mode == :offered
+          raise GameError, "Can only offer up #{@offer.name}" unless corporation == @offer
 
           @game.log << "#{corporation.name} is offered at auction, buying corporation will receive "\
             "#{@game.format_currency(treasury_share_compensation(corporation))} for treasury shares"
@@ -454,7 +454,7 @@ module Engine
         end
 
         def auctioning_corporation
-          @offer || @auctioning || @winner&.corporation
+          @offer || @buyer || @auctioning || @winner&.corporation
         end
 
         def setup

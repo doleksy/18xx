@@ -2,7 +2,7 @@
 
 require_relative '../base'
 require_relative '../../token'
-require_relative 'token_merger'
+require_relative '../token_merger'
 
 module Engine
   module Step
@@ -66,7 +66,7 @@ module Engine
           target = action.corporation
 
           if !target || !mergeable(corporation).include?(target)
-            @game.game_error("Choose a corporation to merge with #{corporation.name}")
+            raise GameError, "Choose a corporation to merge with #{corporation.name}"
           end
 
           receiving = []
@@ -76,13 +76,13 @@ module Engine
             target.spend(target.cash, corporation)
           end
 
-          companies = target.transfer(:companies, corporation).map(&:name)
+          companies = @game.transfer(:companies, target, corporation).map(&:name)
           receiving << "companies (#{companies.join(', ')})" if companies.any?
 
-          loans = target.transfer(:loans, corporation).size
+          loans = @game.transfer(:loans, target, corporation).size
           receiving << "loans (#{loans})" if loans.positive?
 
-          trains = target.transfer(:trains, corporation).map(&:name)
+          trains = @game.transfer(:trains, target, corporation).map(&:name)
           receiving << "trains (#{trains})" if trains.any?
 
           remove_duplicate_tokens(corporation, target)

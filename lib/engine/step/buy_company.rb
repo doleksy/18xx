@@ -16,7 +16,10 @@ module Engine
 
         return PASS if blocks? &&
                        entity.corporation? &&
-                       entity.abilities(time: 'owning_corp_or_turn', owner_type: 'corporation', strict_time: true).any?
+                       @game.abilities(entity,
+                                       time: 'owning_corp_or_turn',
+                                       owner_type: 'corporation',
+                                       strict_time: true)
 
         []
       end
@@ -47,20 +50,19 @@ module Engine
         company = action.company
         price = action.price
         owner = company.owner
-
-        @game.game_error("Cannot buy #{company.name} from #{owner.name}") if owner.is_a?(Corporation)
+        raise GameError, "Cannot buy #{company.name} from #{owner.name}" unless @game.company_sellable(company)
 
         min = company.min_price
         max = company.max_price
         unless price.between?(min, max)
-          @game.game_error("Price must be between #{@game.format_currency(min)} and #{@game.format_currency(max)}")
+          raise GameError, "Price must be between #{@game.format_currency(min)} and #{@game.format_currency(max)}"
         end
 
         log_later = []
         company.owner = entity
         owner&.companies&.delete(company)
 
-        company.abilities(:assign_corporation) do |ability|
+        @game.abilities(company, :assign_corporation) do |ability|
           Assignable.remove_from_all!(assignable_corporations, company.id) do |unassigned|
             log_later << "#{company.name} is unassigned from #{unassigned.name}" if unassigned.name != entity.name
           end
@@ -76,6 +78,8 @@ module Engine
             end
         end
 
+        @game.abilities(company, :revenue_change, time: :sold) { |ability| company.revenue = ability.revenue }
+
         company.remove_ability_when(:sold)
 
         @round.just_sold_company = company
@@ -83,6 +87,9 @@ module Engine
 
         entity.companies << company
         entity.spend(price, owner.nil? ? @game.bank : owner)
+
+        @game.company_bought(company, entity)
+
         @log << "#{entity.name} buys #{company.name} from "\
                 "#{owner.nil? ? 'the market' : owner.name} for "\
                 "#{@game.format_currency(price)}"

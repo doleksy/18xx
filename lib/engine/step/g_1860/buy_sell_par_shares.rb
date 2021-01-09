@@ -43,6 +43,10 @@ module Engine
           []
         end
 
+        def purchasable_unsold_companies
+          []
+        end
+
         def can_buy_company?(player, company)
           !did_sell?(company, player)
         end
@@ -60,10 +64,12 @@ module Engine
         end
 
         def process_buy_shares(action)
+          corporation = action.bundle.corporation
+          floated = corporation.floated?
+
           super
 
-          corporation = action.bundle.corporation
-          place_home_track(corporation) if corporation.floated?
+          place_home_track(corporation) if corporation.floated? && !floated && !@game.sr_after_southern
           @game.check_new_layer
         end
 
@@ -79,7 +85,7 @@ module Engine
           price = action.price
           owner = company.owner
 
-          @game.game_error("Cannot buy #{company.name} from #{owner.name}") unless owner == @game.bank
+          raise GameError, "Cannot buy #{company.name} from #{owner.name}" unless owner == @game.bank
 
           company.owner = player
 
@@ -137,7 +143,7 @@ module Engine
         def process_sell_company(action)
           company = action.company
           player = action.entity
-          @game.game_error("Cannot sell #{company.id}") unless can_sell_company?(company)
+          raise GameError, "Cannot sell #{company.id}" unless can_sell_company?(company)
 
           sell_company(player, company, action.price)
           @round.last_to_act = player

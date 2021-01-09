@@ -44,10 +44,11 @@ module Engine
       SEED_MONEY = 200
       MUST_BUY_TRAIN = :never
       EBUY_PRES_SWAP = false # allow presidential swaps of other corps when ebuying
+      CERT_LIMIT_INCLUDES_PRIVATES = false
       POOL_SHARE_DROP = :each
       SELL_MOVEMENT = :none
       ALL_COMPANIES_ASSIGNABLE = true
-      SELL_AFTER = :operate
+      SELL_AFTER = :after_ipo
       DEV_STAGE = :production
       OBSOLETE_TRAINS_COUNT_FOR_LIMIT = true
 
@@ -63,7 +64,7 @@ module Engine
       # Two lays with one being an upgrade, second tile costs 20
       TILE_LAYS = [{ lay: true, upgrade: true }, { lay: true, upgrade: :not_if_upgraded, cost: 20 }].freeze
 
-      LIMIT_TOKENS = 8
+      LIMIT_TOKENS_AFTER_MERGER = 8
 
       EVENTS_TEXT = Base::EVENTS_TEXT.merge('signal_end_game' => ['Signal End Game',
                                                                   'Game Ends 3 ORs after purchase/export'\
@@ -79,6 +80,18 @@ module Engine
       MARKET_SHARE_LIMIT = 1000 # notionally unlimited shares in market
       CORPORATION_SIZES = { 2 => :small, 5 => :medium, 10 => :large }.freeze
 
+      OPTIONAL_RULES = [
+        { sym: :short_squeeze,
+          short_name: 'Short Squeeze',
+          desc: '100% sold out corporations move twice at end of SR' },
+        { sym: :five_shorts,
+          short_name: '5 Shorts',
+          desc: 'Only allow 5 shorts on 10 share corporations' },
+        { sym: :modern_trains,
+          short_name: 'Modern Trains',
+          desc: '7 & 8 trains earn $10 & $20 respectively for each station marker of the corporation' },
+      ].freeze
+
       include InterestOnLoans
       attr_reader :loan_value, :owner_when_liquidated, :stock_prices_start_merger
 
@@ -86,6 +99,18 @@ module Engine
         @log << '1817 has not been tested thoroughly with more than seven players.' if @players.size > 7
 
         super
+      end
+
+      def option_short_squeeze?
+        @optional_rules&.include?(:short_squeeze)
+      end
+
+      def option_five_shorts?
+        @optional_rules&.include?(:five_shorts)
+      end
+
+      def option_modern_trains?
+        @optional_rules&.include?(:modern_trains)
       end
 
       def ipo_name(_entity = nil)
@@ -151,11 +176,6 @@ module Engine
         player.cash + player.companies.sum(&:value)
       end
 
-      def num_certs(entity)
-        # Privates don't count towards limit
-        entity.shares.count { |s| s.corporation.counts_for_limit && s.counts_for_limit }
-      end
-
       def home_token_locations(corporation)
         hexes.select do |hex|
           hex.tile.cities.any? { |city| city.tokenable?(corporation, free: true) }
@@ -165,6 +185,7 @@ module Engine
       def redeemable_shares(entity)
         return [] unless entity.corporation?
         return [] unless round.steps.find { |step| step.class == Step::G1817::BuySellParShares }.active?
+        return [] if entity.share_price.acquisition? || entity.share_price.liquidation?
 
         bundles_for_corporation(share_pool, entity)
           .reject { |bundle| entity.cash < bundle.price }
@@ -178,7 +199,7 @@ module Engine
 
       def size_corporation(corporation, size)
         original_shares = @_shares.values.select { |share| share.corporation == corporation }
-        game_error('Can only convert 2 share corporation') unless corporation.total_shares == 2
+        raise GameError, 'Can only convert 2 share corporation' unless corporation.total_shares == 2
 
         corporation.share_holders.clear
 
@@ -222,7 +243,7 @@ module Engine
           shares[0].percent = 20
           new_shares = 5.times.map { |i| Share.new(corporation, percent: 10, index: i + 4) }
         else
-          game_error('Cannot convert 10 share corporation')
+          raise GameError, 'Cannot convert 10 share corporation'
         end
 
         corporation.max_ownership_percent = 60
@@ -235,7 +256,13 @@ module Engine
       end
 
       def shorts(corporation)
-        @_shares.values.select { |share| share.corporation == corporation && share.percent.negative? }
+        shares = []
+
+        @_shares.each do |_, share|
+          shares << share if share.corporation == corporation && share.percent.negative?
+        end
+
+        shares
       end
 
       def entity_shorts(entity, corporation)
@@ -315,7 +342,7 @@ module Engine
         max_shares = corporation.player_share_holders.values.max
 
         # Check cross-short merge problem
-        game_error('At least one player must have more than 20% to allow a merge') if max_shares < 20
+        raise GameError, 'At least one player must have more than 20% to allow a merge' if max_shares < 20
 
         # Find the new president, tie break is the surviving corporation president
         # This is done before the cancelling to ensure the new president can cancel any shorts
@@ -401,7 +428,8 @@ module Engine
       end
 
       def take_loan(entity, loan)
-        game_error("Cannot take more than #{maximum_loans(entity)} loans") unless can_take_loan?(entity)
+        raise GameError, "Cannot take more than #{maximum_loans(entity)} loans" unless can_take_loan?(entity)
+
         price = entity.share_price.price
         name = entity.name
         name += " (#{entity.owner.name})" if @round.is_a?(Round::Stock)
@@ -416,17 +444,25 @@ module Engine
       def can_take_loan?(entity)
         entity.corporation? &&
           entity.loans.size < maximum_loans(entity) &&
-          @loans.any?
+          !@loans.empty?
       end
 
       def float_str(_entity)
         '2 shares to start'
       end
 
-      def buying_power(entity, _full = false)
+      def available_loans(entity, extra_loans)
+        [maximum_loans(entity) - entity.loans.size, @loans.size + extra_loans].min
+      end
+
+      def buying_power(entity, extra_loans: 0, **)
         return entity.cash unless entity.corporation?
 
-        entity.cash + ((maximum_loans(entity) - entity.loans.size) * @loan_value)
+        entity.cash + (available_loans(entity, extra_loans) * @loan_value)
+      end
+
+      def unstarted_corporation_summary
+        (@corporations.count { |c| !c.ipoed }).to_s
       end
 
       def liquidate!(corporation)
@@ -439,11 +475,20 @@ module Engine
 
         revenue += 10 * stops.count { |stop| stop.hex.assigned?('bridge') }
 
-        game_error('Route visits same hex twice') if route.hexes.size != route.hexes.uniq.size
+        raise GameError, 'Route visits same hex twice' if route.hexes.size != route.hexes.uniq.size
 
         mine = 'mine'
         if route.hexes.first.assigned?(mine) || route.hexes.last.assigned?(mine)
-          game_error('Route cannot start or end with a mine')
+          raise GameError, 'Route cannot start or end with a mine'
+        end
+
+        if option_modern_trains? && [7, 8].include?(route.train.distance)
+          per_token = route.train.distance == 7 ? 10 : 20
+          revenue += stops.sum do |stop|
+            next per_token if stop.city? && stop.tokened_by?(route.train.owner)
+
+            0
+          end
         end
 
         revenue += 10 * route.all_hexes.count { |hex| hex.assigned?(mine) }
@@ -467,10 +512,6 @@ module Engine
       def corporation_size(entity)
         # For display purposes is a corporation small, medium or large
         CORPORATION_SIZES[entity.total_shares]
-      end
-
-      def show_corporation_size?(_entity)
-        true
       end
 
       private
@@ -500,7 +541,7 @@ module Engine
         @companies.each do |company|
           next unless company.owner
 
-          company.abilities(:revenue_change, time: 'has_train') do |ability|
+          abilities(company, :revenue_change, time: 'has_train') do |ability|
             company.revenue = company.owner.trains.any? ? ability.revenue : 0
           end
         end
@@ -511,11 +552,11 @@ module Engine
           Step::G1817::Loan,
           Step::G1817::SpecialTrack,
           Step::G1817::Assign,
-          Step::DiscardTrain,
           Step::G1817::Track,
           Step::Token,
           Step::Route,
           Step::G1817::Dividend,
+          Step::DiscardTrain,
           Step::G1817::BuyTrain,
         ], round_num: round_num)
       end
@@ -541,7 +582,7 @@ module Engine
             @stock_prices_start_merger = @corporations.map { |corp| [corp, corp.share_price] }.to_h
             @log << "-- #{round_description('Merger and Conversion', @round.round_num)} --"
             Round::G1817::Merger.new(self, [
-              Step::G1817::ReduceTokens,
+              Step::ReduceTokens,
               Step::DiscardTrain,
               Step::G1817::PostConversion,
               Step::G1817::PostConversionLoans,
@@ -550,7 +591,7 @@ module Engine
           when Round::G1817::Merger
             @log << "-- #{round_description('Acquisition', @round.round_num)} --"
             Round::G1817::Acquisition.new(self, [
-              Step::G1817::ReduceTokens,
+              Step::ReduceTokens,
               Step::G1817::Bankrupt,
               Step::G1817::CashCrisis,
               Step::DiscardTrain,

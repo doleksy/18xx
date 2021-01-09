@@ -14,10 +14,10 @@ module Engine
   class Tile
     include Config::Tile
 
-    attr_accessor :hex, :icons, :index, :legal_rotations, :location_name, :name, :reservations
+    attr_accessor :hex, :icons, :index, :legal_rotations, :location_name, :name, :reservations, :upgrades
     attr_reader :blocks_lay, :borders, :cities, :color, :edges, :junction, :nodes, :label,
-                :parts, :preprinted, :rotation, :stops, :towns, :upgrades, :offboards, :blockers,
-                :city_towns, :unlimited, :stubs, :partitions, :id
+                :parts, :preprinted, :rotation, :stops, :towns, :offboards, :blockers,
+                :city_towns, :unlimited, :stubs, :partitions, :id, :frame
 
     ALL_EDGES = [0, 1, 2, 3, 4, 5].freeze
 
@@ -144,6 +144,8 @@ module Engine
         Part::Stub.new(params['edge'].to_i)
       when 'partition'
         Part::Partition.new(params['a'], params['b'], params['type'], params['restrict'])
+      when 'frame'
+        Part::Frame.new(params['color'])
       end
     end
 
@@ -176,6 +178,7 @@ module Engine
       @nodes = nil
       @stops = nil
       @edges = nil
+      @frame = nil
       @junction = nil
       @icons = []
       @location_name = location_name
@@ -282,11 +285,12 @@ module Engine
       @reservations.any? { |r| [r, r.owner].include?(corporation) }
     end
 
-    def add_reservation!(entity, city, slot = 0)
+    def add_reservation!(entity, city, slot = nil)
       # Single city, assume the first
       city = 0 if @cities.one?
+      slot = @cities[city].get_slot(entity) if city && slot.nil?
 
-      if city
+      if city && slot
         @cities[city].add_reservation!(entity, slot)
       else
         @reservations << entity
@@ -471,6 +475,10 @@ module Engine
       end
     end
 
+    def available_slot?
+      cities.sum(&:available_slots).positive?
+    end
+
     private
 
     def separate_parts
@@ -502,6 +510,8 @@ module Engine
           @stubs << part
         elsif part.partition?
           @partitions << part
+        elsif part.frame?
+          @frame = part
         else
           raise "Part #{part} not separated."
         end

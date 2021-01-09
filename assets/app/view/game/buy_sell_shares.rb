@@ -25,12 +25,16 @@ module View
         children = []
 
         children.concat(render_buy_shares)
+        children.concat(render_merge)
         children.concat(render_short)
         children.concat(render_exchanges)
 
         children << h(SellShares, player: @current_entity, corporation: @corporation)
 
-        h(:div, children.compact)
+        children = children.compact
+        return h(:div, children) if children.any?
+
+        nil
       end
 
       def render_buy_shares
@@ -129,7 +133,7 @@ module View
         children = []
 
         @game.companies.each do |company|
-          company.abilities(:exchange) do |ability|
+          @game.abilities(company, :exchange) do |ability|
             next if ability.corporation != @corporation.name && ability.corporation != 'any'
             next unless company.owner == @current_entity
 
@@ -156,6 +160,18 @@ module View
             prefix: "Exchange #{company.sym} for ",
             source: source)
         end
+      end
+
+      def render_merge
+        return [] unless @step.current_actions.include?('choose')
+        return [] unless @step.respond_to?(:can_merge?)
+        return [] unless @step.can_merge?(@current_entity, @corporation)
+
+        merge = lambda do
+          process_action(Engine::Action::Choose.new(@current_entity, choice: @corporation.name))
+        end
+
+        [h(:button, { on: { click: merge } }, 'Merge')]
       end
     end
   end

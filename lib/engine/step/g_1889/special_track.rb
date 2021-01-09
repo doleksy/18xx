@@ -13,8 +13,8 @@ module Engine
           return super unless action.entity == @company
 
           entity = action.entity
-          ability = @company.abilities(:tile_lay, time: 'sold')
-          @game.game_error("Not #{entity.name}'s turn: #{action.to_h}") unless entity == @company
+          ability = @game.abilities(@company, :tile_lay, time: 'sold')
+          raise GameError, "Not #{entity.name}'s turn: #{action.to_h}" unless entity == @company
 
           lay_tile(action, spender: @round.company_sellers[@company])
           check_connect(action, ability)

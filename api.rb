@@ -67,7 +67,7 @@ class Api < Roda
   use Rack::Deflater unless PRODUCTION
 
   STANDARD_ROUTES = %w[
-    / about hotseat login map market new_game profile signup tiles tutorial forgot reset
+    / about hotseat login map market new_game profile signup tiles tutorial forgot reset fixture
   ].freeze
 
   Dir['./routes/*'].sort.each { |file| require file }
@@ -81,7 +81,7 @@ class Api < Roda
 
         publish(
           '/chat',
-          50,
+          100,
           user: user.to_h,
           message: hr.params['message'],
           created_at: Time.now.to_i,
@@ -116,7 +116,6 @@ class Api < Roda
   end
 
   def render(**needs)
-    return debug(**needs) if request.params['debug'] && !PRODUCTION
     return render_pin(**needs) if needs[:pin]
 
     script = Snabberb.prerender_script(
@@ -138,17 +137,6 @@ class Api < Roda
       desc: "Pin #{pin}",
       js_tags: "<script type='text/javascript' src='#{Assets::PIN_DIR}#{pin}.js'></script>",
       attach_func: "Opal.$$.App.$attach('app', #{Snabberb.wrap(app_route: request.path, **needs)})",
-    )
-  end
-
-  def debug(**needs)
-    needs[:disable_user_errors] = true
-    needs = Snabberb.wrap(app_route: request.path, **needs)
-
-    static(
-      desc: 'Debug',
-      js_tags: ASSETS.js_tags,
-      attach_func: "Opal.$$.App.$attach('app', #{needs})",
     )
   end
 

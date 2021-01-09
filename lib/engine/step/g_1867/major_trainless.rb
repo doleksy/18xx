@@ -47,6 +47,20 @@ module Engine
         def trainless_major
           @game.trainless_major
         end
+
+        def choice_available?(entity)
+          entity == trainless_major&.first && entity.corporation?
+        end
+
+        def swap_sell(_player, _corporation, _bundle, _pool_share); end
+
+        def can_sell?(_entity, _bundle)
+          false
+        end
+
+        def ipo_type(_entity)
+          nil
+        end
       end
     end
   end
